@@ -1,0 +1,140 @@
+use bytes::{Buf, Bytes, BytesMut};
+use std::io::Cursor;
+use thiserror::Error;
+
+// --- 1. Frame 和 Error 定义 (保持不变) ---
+
+#[derive(Debug, Error)]
+pub enum KvError {
+    #[error("IO 错误: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("协议解析错误: {0}")]
+    ProtocolError(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Frame {
+    Bulk(Bytes),
+    Array(Vec<Frame>),
+    // ... 其他类型
+}
+
+// --- 2. 核心解析逻辑 ---
+
+/// 总调度函数：尝试从 BytesMut 解析一个 Frame
+pub fn parse_frame(buf: &mut BytesMut) -> Result<Option<Frame>, KvError> {
+    // 1. 创建一个 Cursor 来进行安全的“只读预演”
+    let mut cursor = Cursor::new(&buf[..]);
+
+    // 2. 在 Cursor 上进行递归解析
+    match parse_frame_from_cursor(&mut cursor) {
+        Ok(Some(frame)) => {
+            // 3. 如果预演成功，我们知道了总共消耗了多少字节
+            let consumed = cursor.position() as usize;
+            // 4. 才进行唯一一次的、破坏性的操作：消耗掉这些字节
+            buf.advance(consumed);
+            Ok(Some(frame))
+        }
+        // 如果预演时发现数据不完整 (Ok(None)) 或格式错误 (Err)，
+        // 原始的 buf 毫发无损，我们直接把结果透传回去。
+        result => result,
+    }
+}
+
+/// 在 Cursor 上进行递归解析的“真正”核心函数
+fn parse_frame_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Frame>, KvError> {
+    // 检查游标后面是否还有数据
+    if !cursor.has_remaining() {
+        return Ok(None);
+    }
+
+    match cursor.get_ref()[cursor.position() as usize] {
+        b'*' => parse_array_from_cursor(cursor),
+        b'$' => parse_bulk_string_from_cursor(cursor),
+        _ => Err(KvError::ProtocolError("无效的 Frame 类型前缀".into())),
+    }
+}
+
+/// 在 Cursor 上解析数组
+fn parse_array_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Frame>, KvError> {
+    // 1. 从 Cursor 当前位置读取一行元数据
+    if let Some(line_bytes) = read_line_from_cursor(cursor)? {
+        if line_bytes[0] != b'*' {
+            return Err(KvError::ProtocolError("期望是数组 '*'".into()));
+        }
+        let num_elements = parse_decimal(&line_bytes[1..])?;
+
+        let mut elements = Vec::with_capacity(num_elements);
+        // 2. 循环 N 次，递归地在 Cursor 上解析子元素
+        for _ in 0..num_elements {
+            if let Some(child_frame) = parse_frame_from_cursor(cursor)? {
+                elements.push(child_frame);
+            } else {
+                // 子元素不完整，则整个数组都不完整
+                return Ok(None);
+            }
+        }
+        Ok(Some(Frame::Array(elements)))
+    } else {
+        Ok(None)
+    }
+}
+
+/// 在 Cursor 上解析批量字符串
+fn parse_bulk_string_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Frame>, KvError> {
+    if let Some(line_bytes) = read_line_from_cursor(cursor)? {
+        if line_bytes[0] != b'$' {
+            return Err(KvError::ProtocolError("期望是批量字符串 '$'".into()));
+        }
+        let data_len = parse_decimal(&line_bytes[1..])?;
+
+        // 检查游标后面剩余的数据是否足够
+        if cursor.remaining() < data_len + 2 {
+            return Ok(None);
+        }
+
+        // 提取数据
+        let data = Bytes::copy_from_slice(&cursor.get_ref()[cursor.position() as usize .. cursor.position() as usize + data_len]);
+        // 移动游标
+        cursor.advance(data_len);
+
+        // 检查并消耗结尾的 \r\n
+        if &cursor.get_ref()[cursor.position() as usize .. cursor.position() as usize + 2] != b"\r\n" {
+            return Err(KvError::ProtocolError("批量字符串结尾缺少 \\r\\n".into()));
+        }
+        cursor.advance(2);
+
+        Ok(Some(Frame::Bulk(data)))
+    } else {
+        Ok(None)
+    }
+}
+
+// --- 3. 辅助函数 ---
+
+/// 核心辅助函数：从 Cursor 当前位置读取一行，并移动 Cursor 的位置指针
+fn read_line_from_cursor<'a>(cursor: &mut Cursor<&'a [u8]>) -> Result<Option<&'a [u8]>, KvError> {
+    // 获取游标当前位置之后的所有剩余数据
+    let remaining_buf = &cursor.get_ref()[cursor.position() as usize..];
+
+    if let Some(crlf_pos) = find_crlf(remaining_buf) {
+        // 找到了行，line_bytes 就是这一行的内容 (不包含 \r\n)
+        let line_bytes = &remaining_buf[..crlf_pos];
+        // 移动游标，跳过这一行和结尾的 \r\n
+        cursor.advance(crlf_pos + 2);
+        Ok(Some(line_bytes))
+    } else {
+        // 没找到行，说明数据不完整
+        Ok(None)
+    }
+}
+
+fn find_crlf(buf: &[u8]) -> Option<usize> {
+    buf.windows(2).position(|window| window == b"\r\n")
+}
+
+fn parse_decimal(bytes: &[u8]) -> Result<usize, KvError> {
+    // ... (实现保持不变)
+    let s = std::str::from_utf8(bytes).map_err(|_| KvError::ProtocolError("...".into()))?;
+    s.parse::<usize>().map_err(|_| KvError::ProtocolError("...".into()))
+}

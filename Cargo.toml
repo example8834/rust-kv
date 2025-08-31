@@ -1,0 +1,16 @@
+[package]
+name = "kv"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] } # `full` 特性确保我们拥有所有需要的功能（如TCP、文件系统、计时器等）
+# 优雅地创建自定义错误类型，自动实现 Display, Error, From
+thiserror = "1.0"
+
+# 高效处理字节流的工具，比 Vec<u8> 更适合做网络缓冲区
+bytes = "1"
+
+# (可选，但强烈推荐) 现代化的日志和追踪框架
+tracing = "0.1"
+tracing-subscriber = "0.3"

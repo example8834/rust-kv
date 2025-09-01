@@ -45,7 +45,9 @@ pub async fn execute_command(command: Command, db: &Db) -> Result<Frame, KvError
                 Ok(Frame::Simple("PONG".to_string()))
             }
         }
-        Command::Unimplement{ command, .. }  =>   Ok(Frame::Error(format!("ERR unknown command '{}'", command))),
+        Command::Unimplement { command, .. } => {
+            Ok(Frame::Error(format!("ERR unknown command '{}'", command)))
+        }
     }
 }
 

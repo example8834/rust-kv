@@ -5,18 +5,26 @@ mod error;
 
 use crate::core_execute::{Db, execute_command};
 use crate::core_explain::parse_frame;
+use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
 use bytes::{Buf, BytesMut};
 use std::error::Error;
-use std::io::BufRead;
-use std::ops::Index;
-use std::ptr::read;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use crate::error::Command::Unimplement;
+use tokio::sync::mpsc;
+
+// 定义管道里传递的消息类型，这里就是序列化后的命令
+type AofMessage = Vec<u8>;
+
 
 #[tokio::main] // 这个宏将 main 函数标记为 Tokio 运行时入口点
 async fn main() -> Result<(), Box<dyn Error>> {
+
+    // 创建一个容量为 1024 的管道
+    let (tx, rx) = mpsc::channel::<AofMessage>(1024);
+    // 启动专门的 AOF 写入后台任务
+    tokio::spawn(aof_writer_task(rx, "database.aof"));
+
     tracing_subscriber::fmt::init();
     // 1. 绑定监听地址
     // "127.0.0.1:6379" 是 Redis 的默认端口，我们沿用它可以方便地用 `redis-cli` 测试
@@ -47,7 +55,10 @@ fn find_crlf_idiomatic(buf: &[u8]) -> Option<usize> {
 }
 
 // 处理单个客户端连接的函数
-async fn handle_connection(mut socket: TcpStream, db: Db) -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn handle_connection(
+    mut socket: TcpStream,
+    db: Db,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     // 1. 使用 Vec<u8> 作为缓冲区
     let mut buf = BytesMut::with_capacity(1024);
     // 目前来说用的模式是1 是 redis 格式 0 是单个字符模式
@@ -75,18 +86,20 @@ async fn handle_connection(mut socket: TcpStream, db: Db) -> Result<(), Box<dyn 
                 buf.advance(index + 2);
             }
         } else {
-            println!("{:?}",std::str::from_utf8(&buf));
+            println!("{:?}", std::str::from_utf8(&buf));
             match explain_execute_command(&mut buf, &db).await {
                 Ok(result) => {
                     for item in result {
                         socket.write_all(&item).await?;
                     }
                 }
-                Err(e) => {  // 转换失败（语义错误），准备一个错误响应
+                Err(e) => {
+                    // 转换失败（语义错误），准备一个错误响应
                     let error_response = Frame::Error(e.to_string());
                     socket.write_all(&error_response.serialize()).await?;
                     // 继续处理缓冲区里的下一个命令
-                    continue;}
+                    continue;
+                }
             };
         }
 
@@ -94,20 +107,22 @@ async fn handle_connection(mut socket: TcpStream, db: Db) -> Result<(), Box<dyn 
     }
 }
 
-async fn explain_execute_command(buf: &mut BytesMut, db: &Db) -> Result<Vec<Vec<u8>>, Box<dyn Error + Send + Sync>> {
+async fn explain_execute_command(
+    buf: &mut BytesMut,
+    db: &Db,
+) -> Result<Vec<Vec<u8>>, Box<dyn Error + Send + Sync>> {
     let mut vec_result: Vec<Vec<u8>> = Vec::new();
     while let Ok(Some(frame)) = parse_frame(buf) {
         match Command::try_from(frame) {
-            Ok(frame) => {
-                match frame {
-                    _=> {
-                        let result = execute_command(frame, db).await?;
-                        vec_result.push(result.serialize());
-                    }
+            Ok(frame) => match frame {
+                _ => {
+                    let result = execute_command(frame, db).await?;
+                    vec_result.push(result.serialize());
                 }
-            }
-            Err(e) => return Err(e.into())
+            },
+            Err(e) => return Err(e.into()),
         }
     }
     Ok(vec_result)
 }
+

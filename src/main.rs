@@ -1,9 +1,10 @@
+mod core_aof;
 mod core_exchange;
 mod core_execute;
 mod core_explain;
 mod error;
 
-use crate::core_execute::{Db, execute_command};
+use crate::core_execute::{ execute_command_normal, Db};
 use crate::core_explain::parse_frame;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
@@ -11,19 +12,19 @@ use bytes::{Buf, BytesMut};
 use std::error::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, Sender};
+use crate::core_aof::{aof_writer_task, explain_execute_aofcommand, AofMessage};
 
-// 定义管道里传递的消息类型，这里就是序列化后的命令
-type AofMessage = Vec<u8>;
 
 
 #[tokio::main] // 这个宏将 main 函数标记为 Tokio 运行时入口点
 async fn main() -> Result<(), Box<dyn Error>> {
-
     // 创建一个容量为 1024 的管道
     let (tx, rx) = mpsc::channel::<AofMessage>(1024);
+
+    let aop_file_path = "database.aof";
     // 启动专门的 AOF 写入后台任务
-    tokio::spawn(aof_writer_task(rx, "database.aof"));
+    tokio::spawn(aof_writer_task(rx, aop_file_path));
 
     tracing_subscriber::fmt::init();
     // 1. 绑定监听地址
@@ -32,16 +33,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("服务器启动，监听于 127.0.0.1:6379");
 
     let db = Db::default();
+
+
+    match explain_execute_aofcommand(aop_file_path,&db).await{
+        Err(e) =>{
+            panic!("aof 清理失败  {}" ,e)
+        }
+        _=>{
+            print!("aof数据恢复成功")
+        }
+    }
+
     // 2. 接受连接循环
     loop {
         // 等待一个新的客户端连接
         let (socket, _) = listener.accept().await?;
         tracing::info!("接收到新连接");
         let db = db.clone();
+        let tx_clone = tx.clone();
         // 3. 为每个连接生成一个新的异步任务
         tokio::spawn(async move {
             // 在这个新任务中处理连接
-            if let Err(e) = handle_connection(socket, db).await {
+            if let Err(e) = handle_connection(socket, db, tx_clone).await {
                 tracing::error!("处理时出错: {}", e);
             }
         });
@@ -58,6 +71,7 @@ fn find_crlf_idiomatic(buf: &[u8]) -> Option<usize> {
 async fn handle_connection(
     mut socket: TcpStream,
     db: Db,
+    tx: Sender<AofMessage>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // 1. 使用 Vec<u8> 作为缓冲区
     let mut buf = BytesMut::with_capacity(1024);
@@ -87,7 +101,7 @@ async fn handle_connection(
             }
         } else {
             println!("{:?}", std::str::from_utf8(&buf));
-            match explain_execute_command(&mut buf, &db).await {
+            match explain_execute_command(&mut buf, &db, &tx).await {
                 Ok(result) => {
                     for item in result {
                         socket.write_all(&item).await?;
@@ -110,19 +124,24 @@ async fn handle_connection(
 async fn explain_execute_command(
     buf: &mut BytesMut,
     db: &Db,
+    tx: &Sender<AofMessage>,
 ) -> Result<Vec<Vec<u8>>, Box<dyn Error + Send + Sync>> {
     let mut vec_result: Vec<Vec<u8>> = Vec::new();
-    while let Ok(Some(frame)) = parse_frame(buf) {
+    let mut vec: &[u8] = buf.as_ref();
+    let mut total_size :usize = 0;
+    while let Ok(Some((frame,size))) = parse_frame(vec) {
         match Command::try_from(frame) {
             Ok(frame) => match frame {
                 _ => {
-                    let result = execute_command(frame, db).await?;
+                    let result = execute_command_normal(frame, db, tx).await?;
                     vec_result.push(result.serialize());
+                    vec = &vec[size..];
+                    total_size = size;
                 }
             },
             Err(e) => return Err(e.into()),
         }
     }
+    buf.advance(total_size);
     Ok(vec_result)
 }
-

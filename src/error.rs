@@ -22,7 +22,7 @@ pub enum KvError {
 }
 
 // 2. 定义客户端可以发送的命令
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum Command {
     Set {
         key: String,

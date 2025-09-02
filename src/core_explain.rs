@@ -8,24 +8,22 @@ use std::io::{Cursor, stdout};
 
 /// 总调度函数：尝试从可变的 BytesMut 缓冲区解析一个 Frame。
 /// 这是暴露给外部的唯一入口。
-pub fn parse_frame(buf: &mut BytesMut) -> Result<Option<Frame>, KvError> {
+pub fn parse_frame(buf: &[u8]) -> Result<Option<(Frame,usize)>, KvError> {
     // 1. 创建一个 Cursor 来进行安全的“只读预演”。
     //    Cursor 包裹的是一个对 buf 数据的只读切片。
     let mut cursor = Cursor::new(&buf[..]);
 
     // 2. 在 Cursor 上进行递归解析。
     //    这个过程不会修改原始的 buf。
-    match parse_frame_from_cursor(&mut cursor) {
-        Ok(Some(frame)) => {
+    match parse_frame_from_cursor(&mut cursor)? {
+        Some(frame) => {
             // 3. 如果“预演”成功，我们通过 cursor.position() 知道了总共消耗了多少字节。
             let consumed = cursor.position() as usize;
             // 4. 才进行唯一一次的、破坏性的操作：从原始 buf 中消耗掉这些字节。
-            buf.advance(consumed);
-            Ok(Some(frame))
+            Ok(Some((frame,consumed)))
         }
         // 如果预演时发现数据不完整 (Ok(None)) 或格式错误 (Err)，
-        // 原始的 buf 毫发无损，我们直接把结果透传回去。
-        result => result,
+        _ => Ok(None)
     }
 }
 
@@ -52,6 +50,7 @@ fn parse_array_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Frame>, 
         if line_bytes[0] != b'*' {
             return Err(ProtocolError("期望是数组 '*'".into()));
         }
+
         let num_elements = parse_decimal(&line_bytes[1..])?;
 
         let mut elements = Vec::with_capacity(num_elements);
@@ -80,7 +79,7 @@ fn parse_bulk_string_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Fr
         let data_len = parse_decimal(&line_bytes[1..])?;
 
         // 检查游标后面“剩下”的数据是否足够
-        if cursor.remaining() < data_len + 2 {
+        if cursor.remaining() < data_len + 4 {
             return Ok(None);
         }
 
@@ -122,7 +121,6 @@ fn read_line_from_cursor<'a>(cursor: &mut Cursor<&'a [u8]>) -> Result<Option<&'a
 
 /// 在字节切片中查找 CRLF (`\r\n`)
 fn find_crlf(buf: &[u8]) -> Option<usize> {
-    println!("{:?}",std::str::from_utf8(&buf));
     let index = buf.windows(2).position(|window| window == b"\r\n")?;
     Option::from(index)
 }

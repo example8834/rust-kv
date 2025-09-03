@@ -66,6 +66,7 @@ pub async fn explain_execute_aofcommand(
     let mut file = File::open(path)?;
     //单线程恢复可以很大
     let mut file_data: Vec<u8> = vec![0; 1024 * 1024 * 512];
+    //这个是应该写的区域 会随着不断变化
     let mut file_data_ref = &mut file_data[..];
     let mut exec_time;
     let mut tail_file_length = 0;
@@ -80,8 +81,12 @@ pub async fn explain_execute_aofcommand(
         }
 
         loop {
+            if data.len() == 0 {
+                return Ok(())
+            }
             match parse_frame(data) {
                 Ok(frame) => match frame {
+                    //这个分支只有不可变
                     Some((frame, size)) => {
                         match Command::try_from(frame) {
                             Ok(frame) => {
@@ -95,6 +100,8 @@ pub async fn explain_execute_aofcommand(
                         };
                         tail_size = size;
                     }
+                    //这个分支有可变的复制 但是并没有使用可变 但是直接使用了对象  对象 不可变 可变三者交叉使用
+                    //只要每个域都没有问题 就可以交叉使用 没有问题
                     None => {
                         file_data.copy_within(tail_size..size, 0);
                         // 5. 将剩下的数据移动到缓冲区头部

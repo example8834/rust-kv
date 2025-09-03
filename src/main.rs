@@ -4,7 +4,8 @@ mod core_execute;
 mod core_explain;
 mod error;
 
-use crate::core_execute::{ execute_command_normal, Db};
+use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
+use crate::core_execute::{Db, execute_command_normal};
 use crate::core_explain::parse_frame;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
@@ -13,9 +14,6 @@ use std::error::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, Sender};
-use crate::core_aof::{aof_writer_task, explain_execute_aofcommand, AofMessage};
-
-
 
 #[tokio::main] // 这个宏将 main 函数标记为 Tokio 运行时入口点
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -34,12 +32,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let db = Db::default();
 
-
-    match explain_execute_aofcommand(aop_file_path,&db).await{
-        Err(e) =>{
-            panic!("aof 清理失败  {}" ,e)
+    match explain_execute_aofcommand(aop_file_path, &db).await {
+        Err(e) => {
+            panic!("aof 清理失败  {}", e)
         }
-        _=>{
+        _ => {
             print!("aof数据恢复成功")
         }
     }
@@ -103,6 +100,7 @@ async fn handle_connection(
             println!("{:?}", std::str::from_utf8(&buf));
             match explain_execute_command(&mut buf, &db, &tx).await {
                 Ok(result) => {
+                    print!("{}",result.len());
                     for item in result {
                         socket.write_all(&item).await?;
                     }
@@ -111,6 +109,15 @@ async fn handle_connection(
                     // 转换失败（语义错误），准备一个错误响应
                     let error_response = Frame::Error(e.to_string());
                     socket.write_all(&error_response.serialize()).await?;
+                    //错误处理 裁减掉错误指令
+                    match buf.windows(2).position(|window| window == b"*") {
+                        Some(index) => {
+                            buf.advance(index);
+                        }
+                        None => {
+                            buf.clear();
+                        }
+                    }
                     // 继续处理缓冲区里的下一个命令
                     continue;
                 }
@@ -128,18 +135,39 @@ async fn explain_execute_command(
 ) -> Result<Vec<Vec<u8>>, Box<dyn Error + Send + Sync>> {
     let mut vec_result: Vec<Vec<u8>> = Vec::new();
     let mut vec: &[u8] = buf.as_ref();
-    let mut total_size :usize = 0;
-    while let Ok(Some((frame,size))) = parse_frame(vec) {
+    let mut total_size: usize = 0;
+    /**
+     * 首先盘点一下 由于分层 并且命令是字符串 所以每层都有可能出现错误
+     * 1.第一层就是字符串解析成frame层 这个层面会出现的错误有 这个层面 只看是否能结构化成frame 和 具体指令要求无关
+     *  1.解析过程中 首先就是发现命令没有传输完成就直接跳过
+     *  2.发现比如格式错误
+     *    1.中间/r/n没有
+     *    2.字符串长度和实际标注不匹配
+     *  第一层总体来说就是协议报错 是最底层的问题
+     * 2.第二层就是frame 转换成command 这个就是要对于frame 生成结构严整
+     *  1.首先就是遇到未知指令 返回直接返回说命令没有实现
+     *  2.经典的命令长度不匹配 直接返回错误
+     * 这一层是指令格式校验
+     * 3.执行层面的话 这里错误比较少
+     *   1.一半就是按照校验执行就行 执行出错的时候很少
+     *   2.就是兼容没有实现的指令 这一步返回特定返回值 不需要再上一层就直接返回错误
+     */
+    while let Ok(Some((frame, size))) = parse_frame(vec) {
         match Command::try_from(frame) {
+            //这个错误事第一个指令就错误的错误 就是结构性质错误
             Ok(frame) => match frame {
                 _ => {
-                    let result = execute_command_normal(frame, db, tx).await?;
+                    //这个事指令错误 而不是结构化错误
+                    let result = execute_command_normal(frame, db, tx.clone()).await?;
                     vec_result.push(result.serialize());
                     vec = &vec[size..];
-                    total_size = size;
+                    total_size += size;
                 }
             },
-            Err(e) => return Err(e.into()),
+            Err(e) => {
+                buf.advance(total_size);
+                return Err(e.into());
+            }
         }
     }
     buf.advance(total_size);

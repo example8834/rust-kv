@@ -79,7 +79,7 @@ fn parse_bulk_string_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Fr
         let data_len = parse_decimal(&line_bytes[1..])?;
 
         // 检查游标后面“剩下”的数据是否足够
-        if cursor.remaining() < data_len + 4 {
+        if cursor.remaining() < data_len + 2 - 1 {
             return Ok(None);
         }
 

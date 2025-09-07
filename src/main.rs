@@ -3,9 +3,10 @@ mod core_exchange;
 mod core_execute;
 mod core_explain;
 mod error;
+pub mod db;
 
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
-use crate::core_execute::{Db, execute_command_normal};
+use crate::core_execute::{execute_command_normal};
 use crate::core_explain::parse_frame;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
@@ -14,6 +15,7 @@ use std::error::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, Sender};
+use db::Db;
 
 #[tokio::main] // 这个宏将 main 函数标记为 Tokio 运行时入口点
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -30,6 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
     println!("服务器启动，监听于 127.0.0.1:6379");
 
+    //创建db
     let db = Db::default();
 
     match explain_execute_aofcommand(aop_file_path, &db).await {

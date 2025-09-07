@@ -3,7 +3,6 @@ use crate::error::KvError::ProtocolError;
 use crate::error::{Command, Frame, KvError};
 use bytes::{Buf, Bytes, BytesMut};
 use std::io::{Cursor, stdout};
-
 /// --- 2. 核心解析逻辑 ---
 
 /// 总调度函数：尝试从可变的 BytesMut 缓冲区解析一个 Frame。
@@ -39,6 +38,7 @@ fn parse_frame_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Frame>, 
     match cursor.get_ref()[cursor.position() as usize] {
         b'*' => parse_array_from_cursor(cursor),
         b'$' => parse_bulk_string_from_cursor(cursor),
+        b':' => parse_integer_from_cursor(cursor),
         _ => Err(ProtocolError("无效的 Frame 类型前缀".into()))
     }
 }
@@ -103,6 +103,30 @@ fn parse_bulk_string_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Fr
     }
 }
 
+
+/// 在 Cursor 上解析整数
+fn parse_integer_from_cursor(cursor: &mut Cursor<&[u8]>) -> Result<Option<Frame>, KvError> {
+    // 1. 尝试读取一行 (e.g., ":1000\r\n")
+    if let Some(line_bytes) = read_line_from_cursor(cursor)? {
+        // 确保前缀是 ':'
+        if line_bytes[0] != b':' {
+            return Err(ProtocolError("期望是整数 ':'".into()));
+        }
+        
+        // 2. 将 `:` 后面的部分转成字符串
+        let s = std::str::from_utf8(&line_bytes[1..])
+            .map_err(|_| ProtocolError("无效的 UTF-8 整数序列".into()))?;
+            
+        // 3. 将字符串解析成 i64
+        let i = s.parse::<i64>()
+            .map_err(|_| ProtocolError("无效的 i64 格式".into()))?;
+            
+        Ok(Some(Frame::Integer(i)))
+    } else {
+        // 元数据行不完整
+        Ok(None)
+    }
+}
 // --- 3. 辅助函数 ---
 
 /// 核心辅助函数：从 Cursor 当前位置读取一行，并移动 Cursor 的位置指针

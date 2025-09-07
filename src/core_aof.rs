@@ -7,9 +7,11 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{self, Duration};
 
-use crate::core_execute::{Db, execute_command};
+use crate::core_execute::{ execute_command};
 use crate::core_explain::parse_frame;
-use crate::error::{Command, KvError};
+use crate::error::{Command};
+use crate::Db;
+
 // 定义管道里传递的消息类型，这里就是序列化后的命令
 pub type AofMessage = Vec<u8>;
 

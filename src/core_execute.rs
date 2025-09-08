@@ -64,11 +64,11 @@ pub async fn execute_command_hook(
                     match expire {
                         Expiration::PX(time) => {
                             frame_vec.push(str_to_bluk(ToBulk::String("PX".into())));
-                            frame_vec.push(str_to_bluk(ToBulk::Integer(time.clone() as i64)));
+                            frame_vec.push(str_to_bluk(ToBulk::String(time.to_string())));
                         }
                         Expiration::EX(time) => {
                             frame_vec.push(str_to_bluk(ToBulk::String("EX".into())));
-                            frame_vec.push(str_to_bluk(ToBulk::Integer(time.clone() as i64)));
+                            frame_vec.push(str_to_bluk(ToBulk::String(time.to_string() )));
                         }
                     }
                 }
@@ -171,6 +171,7 @@ impl Frame {
             }
         }
     }
+
 }
 /// 获取当前时间的毫秒级 UNIX 时间戳 (u64)
 fn current_timestamp_ms() -> u64 {

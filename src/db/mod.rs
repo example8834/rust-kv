@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 // 确保有这行
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::{ MutexGuard, RwLock};
 
 use crate::error::KvError;
 
@@ -32,7 +32,7 @@ type DbStore = HashMap<String, ValueEntry>;
 // 把 Arc<Mutex<...>> 封装到一个新结构里，这是个好习惯
 #[derive(Clone, Default)]
 pub struct Db {
-    store: Arc<Mutex<DbStore>>,
+    store: Arc<RwLock<DbStore>>,
 }
 impl Db {
     // 提供一个公共的构造函数
@@ -43,7 +43,7 @@ impl Db {
 
     // 提供一个公共的、异步的 `get` 方法
     pub async fn get(&self, key: &str) -> Option<ValueEntry> {
-        let store = self.store.lock().await;
+        let store = self.store.read().await;
         // 这里的逻辑可能还包含检查 key 是否过期
         store.get(key).cloned() // 假设 ValueEntry 是 Clone 的
     }
@@ -58,7 +58,7 @@ impl Db {
     where
         F: FnOnce() -> Pin<Box<dyn Future<Output = Result<(), KvError>> + Send>>,
     {
-        let mut store: MutexGuard<HashMap<String, ValueEntry>> = self.store.lock().await;
+        let mut store = self.store.write().await;
         store.insert(key, value);
         if let Some(fun) = hook {
             match fun().await {
@@ -72,7 +72,7 @@ impl Db {
     }
 
     pub async fn delete(&self, key: &str) -> Result<(),KvError>{
-        let mut store = self.store.lock().await;
+        let mut store = self.store.write().await;
         store.remove(key);
         Ok(())
     }

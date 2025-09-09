@@ -125,7 +125,7 @@ fn read_line_from_cursor<'a>(cursor: &mut Cursor<&'a [u8]>) -> Result<Option<&'a
 // }
 
 
-/// 在字节切片中查找 CRLF (`\r\n`)，使用 memchr 进行 SIMD 优化
+/// 在字节切片中查找 CRLF (`\r\n`)，使用 memchr 进行 SIMD 优化 指令集可以一次读取较长 并行比较
 fn find_crlf(buf: &[u8]) -> Option<usize> {
     // 创建一个针对 b"\r\n" 的专用查找器
     // Finder::new 的开销很小，可以在循环中重复创建

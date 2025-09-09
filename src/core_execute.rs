@@ -1,14 +1,16 @@
 use crate::Db;
 use crate::core_aof::AofMessage;
-use crate::db::{Value, ValueEntry};
+use crate::db::{Element, Value, ValueEntry};
 use crate::error::{Command, Expiration, Frame, IsAof, KvError, ToBulk};
 use bytes::Bytes;
+use itoa::Buffer;
 use std::f32::consts::E;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
+use tracing_subscriber::registry::Data;
 
 // 假定：Command: Clone
 pub async fn execute_command(command: Command, db: &Db) -> Result<Frame, KvError> {
@@ -37,10 +39,23 @@ pub async fn execute_command_hook(
                         return Ok(Frame::Null);
                     }
                 }
-                if let Value::String(data) = data {
-                    Ok(Frame::Bulk(data.clone()))
-                } else {
-                    Ok(Frame::Null)
+
+                //这是处理字符串的方法
+                match data {
+                    Value::Simple(Element::String(bytes)) => Ok(Frame::Bulk(bytes)),
+                    //性能优化
+                    Value::Simple(Element::Int(i)) => {
+                        // 1. 创建一个栈上的缓冲区 (无堆分配)
+                        let mut buffer = Buffer::new();
+
+                        // 2. 将数字格式化到缓冲区中，返回一个指向缓冲区内容的 &str
+                        let printed_str = buffer.format(i);
+
+                        // 3. 从结果切片创建 Bytes (这里有一次复制，但避免了堆分配)
+                        let bytes = Bytes::copy_from_slice(printed_str.as_bytes());
+                        Ok(Frame::Bulk(Bytes::from(bytes)))
+                    }
+                    _ => Ok(Frame::Null), // 如果不是字符串类型，返回 Null
                 }
             } else {
                 Ok(Frame::Null)
@@ -52,7 +67,7 @@ pub async fn execute_command_hook(
             expiration,
             conditiion,
         } => {
-            let  mut aof_cellback= None;
+            let mut aof_cellback = None;
             if let IsAof::Yes = is_aof {
                 let mut frame_vec = vec![
                     Frame::Bulk(Bytes::from("SET")),
@@ -68,7 +83,7 @@ pub async fn execute_command_hook(
                         }
                         Expiration::EX(time) => {
                             frame_vec.push(str_to_bluk(ToBulk::String("EX".into())));
-                            frame_vec.push(str_to_bluk(ToBulk::String(time.to_string() )));
+                            frame_vec.push(str_to_bluk(ToBulk::String(time.to_string())));
                         }
                     }
                 }
@@ -84,39 +99,52 @@ pub async fn execute_command_hook(
                     }
                 }
 
-                 aof_cellback =
-                    Some(move || -> Pin<Box<dyn Future<Output = Result<(), KvError>> + Send>> {
+                aof_cellback = Some(
+                    move || -> Pin<Box<dyn Future<Output = Result<(), KvError>> + Send>> {
                         Box::pin(async move {
                             if let Some(aof_send) = tx {
                                 aof_send
                                     .send(Frame::Array(frame_vec.clone()).serialize())
-                                    .await.map_err(|_| KvError::ProtocolError("无效的 i64 格式".into()))?;
+                                    .await
+                                    .map_err(|_| {
+                                        KvError::ProtocolError("无效的 i64 格式".into())
+                                    })?;
                             }
                             Ok(())
                         })
-                    });
+                    },
+                );
             }
 
-            let mut time_expire= None;
+            let mut time_expire = None;
             if let Some(expiration) = expiration {
                 match expiration {
                     Expiration::EX(time) => {
-                        time_expire =  Some(current_timestamp_ms() + time * 1000);
+                        time_expire = Some(current_timestamp_ms() + time * 1000);
                     }
                     Expiration::PX(time) => {
                         time_expire = Some(current_timestamp_ms() + time);
                     }
                 }
             }
-            db.set(
-                key,
-                ValueEntry {
-                    data: crate::db::Value::String(value),
-                    expires_at: time_expire,
-                },
-                aof_cellback,
-            )
-            .await.map_err(|_| KvError::ProtocolError("无效的 i64 格式".into()))?;
+            let value_obj;
+            match bytes_to_i64_fast(&value) {
+                Some(i) => {
+                    value_obj = ValueEntry {
+                        data: crate::db::Value::Simple(Element::Int(i)),
+                        expires_at: time_expire,
+                    }
+                }
+                None => {
+                    value_obj = ValueEntry {
+                        data: crate::db::Value::Simple(Element::String(value)),
+                        expires_at: time_expire,
+                    }
+                }
+            };
+            db.set(key, value_obj, aof_cellback)
+                .await
+                .map_err(|_| KvError::ProtocolError("无效的 i64 格式".into()))?;
             Ok(Frame::Simple("OK".to_string()))
         }
         Command::PING { value } => {
@@ -149,6 +177,14 @@ pub async fn execute_command_normal(
     Ok(frame)
 }
 
+/// 一个直接从 Bytes 高效解析 i64 的函数
+fn bytes_to_i64_fast(b: &Bytes) -> Option<i64> {
+    // 顯式標註 result 變量的類型
+    // 直接告訴 parse 函數，你想解析成 i64
+    let result = lexical_core::parse::<i64>(b);
+    result.ok()
+}
+
 impl Frame {
     pub fn serialize(&self) -> Vec<u8> {
         match self {
@@ -171,7 +207,6 @@ impl Frame {
             }
         }
     }
-
 }
 /// 获取当前时间的毫秒级 UNIX 时间戳 (u64)
 fn current_timestamp_ms() -> u64 {

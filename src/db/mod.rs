@@ -9,15 +9,22 @@ use tokio::sync::{ MutexGuard, RwLock};
 
 use crate::error::KvError;
 
-// 这个枚举代表了 Redis 支持的各种数据类型
-// 1. 让 Value 枚举本身可以 Clone
+#[derive(Clone, Debug, PartialEq, Eq, Hash)] // 需要派生 Hash 和 Eq 才能用于 HashSet
+pub enum Element {
+    String(Bytes),
+    Int(i64),
+}
+
+// 第二步：修改顶层的 Value 枚举，让集合类型使用 Element
 #[derive(Clone, Debug)]
 pub enum Value {
-    String(Bytes),
-    List(VecDeque<Bytes>),
-    Hash(HashMap<String, Bytes>),
-    Set(HashSet<Bytes>),
-    // 以后还可以添加 ZSet (Sorted Set) 等
+    // 对于简单的 K-V，值就是一个 Element
+    Simple(Element), 
+    
+    // 集合类型包含的是 Element 的集合
+    List(VecDeque<Element>),
+    Hash(HashMap<String, Element>), // Hash 的 value 也是 Element
+    Set(HashSet<Element>),
 }
 // 1. 让 Value 枚举本身可以 Clone
 #[derive(Clone, Debug)]

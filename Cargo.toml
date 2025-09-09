@@ -16,3 +16,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 memchr = "2.7"
+
+itoa="1.0"
+
+lexical-core ="0.8"

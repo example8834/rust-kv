@@ -2,6 +2,7 @@ use crate::error::Frame::{Array, Bulk};
 use crate::error::KvError::ProtocolError;
 use crate::error::{Command, Frame, KvError};
 use bytes::{Buf, Bytes, BytesMut};
+use memchr::memmem;
 use std::io::{Cursor, stdout};
 /// --- 2. 核心解析逻辑 ---
 
@@ -119,10 +120,19 @@ fn read_line_from_cursor<'a>(cursor: &mut Cursor<&'a [u8]>) -> Result<Option<&'a
 }
 
 /// 在字节切片中查找 CRLF (`\r\n`)
+// fn find_crlf(buf: &[u8]) -> Option<usize> {
+//     buf.windows(2).position(|window| window == b"\r\n")
+// }
+
+
+/// 在字节切片中查找 CRLF (`\r\n`)，使用 memchr 进行 SIMD 优化
 fn find_crlf(buf: &[u8]) -> Option<usize> {
-    let index = buf.windows(2).position(|window| window == b"\r\n")?;
-    Option::from(index)
+    // 创建一个针对 b"\r\n" 的专用查找器
+    // Finder::new 的开销很小，可以在循环中重复创建
+    let finder = memmem::Finder::new(b"\r\n");
+    finder.find(buf)
 }
+
 
 /// 将字节切片解析成一个 usize 类型的十进制数
 fn parse_decimal(bytes: &[u8]) -> Result<usize, KvError> {

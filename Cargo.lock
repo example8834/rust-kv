@@ -78,6 +78,7 @@ name = "kv"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "memchr",
  "thiserror",
  "tokio",
  "tracing",

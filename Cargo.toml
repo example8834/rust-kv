@@ -11,6 +11,8 @@ thiserror = "1.0"
 # 高效处理字节流的工具，比 Vec<u8> 更适合做网络缓冲区
 bytes = "1"
 
-# (可选，但强烈推荐) 现代化的日志和追踪框架
+# 现代化的日志和追踪框架
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+memchr = "2.7"

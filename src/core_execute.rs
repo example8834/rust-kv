@@ -29,7 +29,7 @@ pub async fn execute_command_hook(
     is_aof: IsAof,
 ) -> Result<Frame, KvError> {
     match command {
-        Command::Get { key } => {
+        Command::Get(Get { key }) => {
             if let Some(value) = db.get(&key).await {
                 let data = value.data;
                 let expire = value.expires_at;
@@ -61,91 +61,11 @@ pub async fn execute_command_hook(
                 Ok(Frame::Null)
             }
         }
-        Command::Set {
-            key,
-            value,
-            expiration,
-            conditiion,
-        } => {
-            let mut aof_cellback = None;
-            if let IsAof::Yes = is_aof {
-                let mut frame_vec = vec![
-                    Frame::Bulk(Bytes::from("SET")),
-                    // 这里 key 和 value 是 move 进来的，不再需要 clone
-                    Frame::Bulk(Bytes::from(key.clone())),
-                    Frame::Bulk(value.clone()),
-                ];
-                if let Some(expire) = &expiration {
-                    match expire {
-                        Expiration::PX(time) => {
-                            frame_vec.push(str_to_bluk(ToBulk::String("PX".into())));
-                            frame_vec.push(str_to_bluk(ToBulk::String(time.to_string())));
-                        }
-                        Expiration::EX(time) => {
-                            frame_vec.push(str_to_bluk(ToBulk::String("EX".into())));
-                            frame_vec.push(str_to_bluk(ToBulk::String(time.to_string())));
-                        }
-                    }
-                }
-
-                if let Some(condition) = conditiion {
-                    match condition {
-                        crate::error::SetCondition::NX => {
-                            frame_vec.push(str_to_bluk(ToBulk::String("NX".into())));
-                        }
-                        crate::error::SetCondition::XX => {
-                            frame_vec.push(str_to_bluk(ToBulk::String("XX".into())));
-                        }
-                    }
-                }
-
-                aof_cellback = Some(
-                    move || -> Pin<Box<dyn Future<Output = Result<(), KvError>> + Send>> {
-                        Box::pin(async move {
-                            if let Some(aof_send) = tx {
-                                aof_send
-                                    .send(Frame::Array(frame_vec.clone()).serialize())
-                                    .await
-                                    .map_err(|_| {
-                                        KvError::ProtocolError("无效的 i64 格式".into())
-                                    })?;
-                            }
-                            Ok(())
-                        })
-                    },
-                );
-            }
-
-            let mut time_expire = None;
-            if let Some(expiration) = expiration {
-                match expiration {
-                    Expiration::EX(time) => {
-                        time_expire = Some(current_timestamp_ms() + time * 1000);
-                    }
-                    Expiration::PX(time) => {
-                        time_expire = Some(current_timestamp_ms() + time);
-                    }
-                }
-            }
-            let value_obj;
-            match bytes_to_i64_fast(&value) {
-                Some(i) => {
-                    value_obj = ValueEntry {
-                        data: crate::db::Value::Simple(Element::Int(i)),
-                        expires_at: time_expire,
-                    }
-                }
-                None => {
-                    value_obj = ValueEntry {
-                        data: crate::db::Value::Simple(Element::String(value)),
-                        expires_at: time_expire,
-                    }
-                }
-            };
-            db.set(key, value_obj, aof_cellback)
-                .await
-                .map_err(|_| KvError::ProtocolError("无效的 i64 格式".into()))?;
-            Ok(Frame::Simple("OK".to_string()))
+        Command::Set(set) => {
+            set.execute(&mut super::CommandContext {
+                db,
+                tx,
+            }).await
         }
         Command::PING { value } => {
             if let Some(msg) = value {

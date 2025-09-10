@@ -4,6 +4,8 @@ mod core_execute;
 mod core_explain;
 mod error;
 pub mod db;
+pub mod command_execute;
+pub mod command_exchange;
 
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
 use crate::core_execute::{execute_command_normal};

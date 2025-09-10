@@ -25,24 +25,36 @@ pub enum KvError {
 // 2. 定义客户端可以发送的命令
 #[derive(Debug,Clone)]
 pub enum Command {
-    Set {
-        key: String,
-        value: Bytes, // 值可以是任意字节，所以用 Vec<u8>
-          // Expiration 可以是一个枚举，用来区分 EX/PX 等
-        expiration: Option<Expiration>, 
-        conditiion: Option<SetCondition>
-    },
-    Get {
-        key: String,
-    },
-    Unimplement {
-        command: String,
-        args: Vec<Bytes>,
-    },
+    Set(Set), // 不再有 { ... }，而是直接包裹 Set 结构体
+    Get(Get),
+    Ping(Ping),
+    Unimplement(Unimplement)
+}
 
-    PING {
-        value: Option<String>,
-    }, // 我们可以稍后再添加 Del, Ping 等其他命令
+
+// 每一个 struct 现在都是一个独立的、清晰的命令“实体”
+#[derive(Debug, Clone)]
+pub struct Set {
+    pub key: String,
+    pub value: Bytes,
+    pub expiration: Option<Expiration>, 
+    pub conditiion: Option<SetCondition>
+}
+
+#[derive(Debug, Clone)]
+pub struct Get {
+    pub key: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Ping {
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Unimplement {
+    pub command: String,
+    pub args: Vec<Bytes>,
 }
 
 #[derive(Debug,Clone)]

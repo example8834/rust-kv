@@ -4,8 +4,9 @@ use std::{
     pin::Pin,
     sync::Arc,
 };
+pub mod string;
 // 确保有这行
-use tokio::sync::{ MutexGuard, RwLock};
+use tokio::sync::{ RwLock};
 
 use crate::error::KvError;
 
@@ -33,6 +34,15 @@ pub struct ValueEntry {
     pub expires_at: Option<u64>, // u64 用来存过期时间点的时间戳
 }
 
+// 这是一个新的、公开的结构体
+// 它的生命周期 'a 被绑定到它持有的 MutexGuard
+pub struct LockedDb<'a> {
+    // 关键：它持有锁的守卫，但这个字段是私有的！
+    // 外界无法通过 LockedDb 直接访问 guard.data
+    pub guard: tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>
+}
+
+
 // 我们的核心存储结构
 type DbStore = HashMap<String, ValueEntry>;
 
@@ -41,6 +51,9 @@ type DbStore = HashMap<String, ValueEntry>;
 pub struct Db {
     store: Arc<RwLock<DbStore>>,
 }
+//其实理论上操作需要绑定数据 并且内聚的情况下。理论上操作db 就应该核心的方法收拾有db提供 外部不应该耦合到db内部
+//db内部就应该提供方法 如果外部执行指令 都需要调用db 也不错 就是如果无法接偶 db提供方法尽量底层 让外部拼接
+//也是不错的 如果就需要和db底层耦合比较多的情况下 那大部分方法 涉及底层操作 需要db的封装比较多 可以分开不同文件来增加可读性 
 impl Db {
     // 提供一个公共的构造函数
     pub fn new() -> Self {
@@ -50,9 +63,17 @@ impl Db {
 
     // 提供一个公共的、异步的 `get` 方法
     pub async fn get(&self, key: &str) -> Option<ValueEntry> {
-        let store = self.store.read().await;
+        let store: tokio::sync::RwLockReadGuard<'_, HashMap<String, ValueEntry>> = self.store.read().await;
         // 这里的逻辑可能还包含检查 key 是否过期
         store.get(key).cloned() // 假设 ValueEntry 是 Clone 的
+    }
+
+
+    // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
+    pub async fn lock(&self) -> LockedDb<'_> {
+        LockedDb {
+            guard: self.store.write().await,
+        }
     }
 
     // 提供一个公共的、异步的 `set` 方法
@@ -65,7 +86,7 @@ impl Db {
     where
         F: FnOnce() -> Pin<Box<dyn Future<Output = Result<(), KvError>> + Send>>,
     {
-        let mut store = self.store.write().await;
+        let mut store: tokio::sync::RwLockWriteGuard<'_, HashMap<String, ValueEntry>> = self.store.write().await;
         store.insert(key, value);
         if let Some(fun) = hook {
             match fun().await {
@@ -83,4 +104,12 @@ impl Db {
         store.remove(key);
         Ok(())
     }
+}
+
+// 一个直接从 Bytes 高效解析 i64 的函数
+pub fn bytes_to_i64_fast(b: &Bytes) -> Option<i64> {
+    // 顯式標註 result 變量的類型
+    // 直接告訴 parse 函數，你想解析成 i64
+    let result = lexical_core::parse::<i64>(b);
+    result.ok()
 }

@@ -1,6 +1,6 @@
 use std::ops::Index;
 
-use crate::error::Command::{Get, PING, Set, Unimplement};
+use crate::error::Command::{Get, Ping, Set, Unimplement};
 use crate::error::KvError::ProtocolError;
 use crate::error::{Command, Expiration, Frame, KvError, SetCondition};
 use bytes::Bytes;
@@ -17,7 +17,7 @@ impl TryFrom<Frame> for Command {
             return Err(ProtocolError("frame is empty".into()));
         }
         let length = frames.len();
-        let mut iter = frames.into_iter();
+        let mut iter: std::vec::IntoIter<Frame> = frames.into_iter();
         match iter.next() {
          Some(Frame::Bulk(start_str)) => {
                 let command_name = String::from_utf8(start_str.to_vec())
@@ -29,7 +29,7 @@ impl TryFrom<Frame> for Command {
                             return Err(ProtocolError("GET 命令需要 1 个参数".into()));
                         }
                         let get_key = extract_bulk_string(iter.next())?;
-                        Ok(Get { key: get_key })
+                        Ok(Get(Get { key: get_k))
                     }
                     "SET" => {
                         if length < 3 {

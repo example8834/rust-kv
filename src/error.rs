@@ -25,34 +25,34 @@ pub enum KvError {
 // 2. 定义客户端可以发送的命令
 #[derive(Debug,Clone)]
 pub enum Command {
-    Set(Set), // 不再有 { ... }，而是直接包裹 Set 结构体
-    Get(Get),
-    Ping(Ping),
-    Unimplement(Unimplement)
+    Set(SetCommand), // 不再有 { ... }，而是直接包裹 Set 结构体
+    Get(GetCommand),
+    Ping(PingCommand),
+    Unimplement(UnimplementCommand)
 }
 
 
 // 每一个 struct 现在都是一个独立的、清晰的命令“实体”
 #[derive(Debug, Clone)]
-pub struct Set {
+pub struct SetCommand {
     pub key: String,
     pub value: Bytes,
     pub expiration: Option<Expiration>, 
-    pub conditiion: Option<SetCondition>
+    pub condition: Option<SetCondition>
 }
 
 #[derive(Debug, Clone)]
-pub struct Get {
+pub struct GetCommand {
     pub key: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct Ping {
+pub struct PingCommand {
     pub value: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Unimplement {
+pub struct UnimplementCommand {
     pub command: String,
     pub args: Vec<Bytes>,
 }

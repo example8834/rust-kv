@@ -1,8 +1,9 @@
 use std::ops::Index;
 
+use crate::command_exchange::CommandExchange;
 use crate::error::Command::{Get, Ping, Set, Unimplement};
 use crate::error::KvError::ProtocolError;
-use crate::error::{Command, Expiration, Frame, KvError, SetCondition};
+use crate::error::{Command, Expiration, Frame, KvError,  SetCommand, SetCondition};
 use bytes::Bytes;
 
 impl TryFrom<Frame> for Command {
@@ -29,64 +30,13 @@ impl TryFrom<Frame> for Command {
                             return Err(ProtocolError("GET 命令需要 1 个参数".into()));
                         }
                         let get_key = extract_bulk_string(iter.next())?;
-                        Ok(Get(Get { key: get_k))
+                        // Ok(Get(Get { key: get_k))
                     }
                     "SET" => {
                         if length < 3 {
                             return Err(ProtocolError("frame is too short".into()));
                         }
-                        let set_key = extract_bulk_string(iter.next())?;
-                        let set_value = extract_bulk_bytes(iter.next())?;
-                        let mut expiration: Option<Expiration> = None;
-                        let mut condition: Option<SetCondition> = None;
-                        let mut index = 3;
-                        while index < length - 1 {
-                            let frame_str = extract_bulk_string(iter.next())?.to_uppercase();
-                            match frame_str.as_str() {
-                                "EX" => {
-                                    // EX 后面必须跟一个数字
-                                    index += 1; // 移动到下一个参数
-                                    if index >= length {
-                                        return Err(ProtocolError("😧 EX 后参数传递错误".into()));
-                                    }
-                                    let seconds = extract_bulk_integer(iter.next())?;
-                                    expiration = Some(Expiration::EX(seconds as u64 ));
-                                }
-                                "PX" => {
-                                    // PX 后面也必须跟一个数字
-                                    index += 1;
-                                    if index >= length {
-                                        return Err(ProtocolError("😧 PX 后参数传递错误".into()));
-                                    }
-                                    let ms = extract_bulk_integer(iter.next())?;
-                                    expiration = Some(Expiration::PX(ms as u64));
-                                }
-                                "NX" => {
-                                    // NX 和 XX 不能同时存在
-                                    if condition.is_some() {
-                                        return Err(ProtocolError("😧 NX 和 XX 不能同时存在".into()));
-                                    }
-                                    condition = Some(SetCondition::NX);
-                                }
-                                "XX" => {
-                                    // NX 和 XX 不能同时存在
-                                    if condition.is_some() {
-                                        return Err(ProtocolError("😧 NX 和 XX 不能同时存在".into()));
-                                    }
-                                    condition = Some(SetCondition::XX);
-                                }
-                                _ => {
-                                    // 遇到了无法识别的选项
-                                    return Err(ProtocolError("😧 碰到无法识别错误".into()));
-                                }
-                            }
-                        }
-                        Ok(Set {
-                            key: set_key,
-                            value: set_value,
-                            expiration:expiration,
-                            conditiion:condition
-                        })
+                        SetCommand::exchange(iter)
                     }
                     "PING" => {
                         let msg = if length > 1 {

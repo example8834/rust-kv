@@ -1,3 +1,4 @@
+use crate::command_execute::{CommandContext, CommandExecutor};
 use crate::Db;
 use crate::core_aof::AofMessage;
 use crate::db::{Element, Value, ValueEntry};
@@ -62,12 +63,12 @@ pub async fn execute_command_hook(
             }
         }
         Command::Set(set) => {
-            set.execute(&mut super::CommandContext {
-                db,
-                tx,
-            }).await
+           set.execute(&mut CommandContext { 
+                db, 
+                tx: &tx
+           }).await
         }
-        Command::PING { value } => {
+        Command::Ping(value) => {
             if let Some(msg) = value {
                 Ok(Frame::Bulk(Bytes::from(msg)))
             } else {

@@ -29,44 +29,13 @@ pub async fn execute_command_hook(
     // Fut 是闭包返回的 Future 类型
     is_aof: IsAof,
 ) -> Result<Frame, KvError> {
+    let mut command_context = CommandContext { db, tx: &tx };
     match command {
-        Command::Get(Get { key }) => {
-            if let Some(value) = db.get(&key).await {
-                let data = value.data;
-                let expire = value.expires_at;
-                if let Some(expire_time) = expire {
-                    if current_timestamp_ms() > expire_time {
-                        db.delete(&key).await?;
-                        return Ok(Frame::Null);
-                    }
-                }
-
-                //这是处理字符串的方法
-                match data {
-                    Value::Simple(Element::String(bytes)) => Ok(Frame::Bulk(bytes)),
-                    //性能优化
-                    Value::Simple(Element::Int(i)) => {
-                        // 1. 创建一个栈上的缓冲区 (无堆分配)
-                        let mut buffer = Buffer::new();
-
-                        // 2. 将数字格式化到缓冲区中，返回一个指向缓冲区内容的 &str
-                        let printed_str = buffer.format(i);
-
-                        // 3. 从结果切片创建 Bytes (这里有一次复制，但避免了堆分配)
-                        let bytes = Bytes::copy_from_slice(printed_str.as_bytes());
-                        Ok(Frame::Bulk(Bytes::from(bytes)))
-                    }
-                    _ => Ok(Frame::Null), // 如果不是字符串类型，返回 Null
-                }
-            } else {
-                Ok(Frame::Null)
-            }
+        Command::Get(get) => {
+            get.execute(&mut command_context).await
         }
         Command::Set(set) => {
-           set.execute(&mut CommandContext { 
-                db, 
-                tx: &tx
-           }).await
+           set.execute(&mut command_context).await
         }
         Command::Ping(value) => {
             if let Some(msg) = value {

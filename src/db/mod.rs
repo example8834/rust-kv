@@ -1,12 +1,14 @@
 use bytes::Bytes;
+use itoa::Buffer;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, OnceLock},
+    time::Instant,
 };
 pub mod string;
 // 确保有这行
-use tokio::sync::{ RwLock};
+use tokio::sync::RwLock;
 
 use crate::error::KvError;
 
@@ -20,8 +22,8 @@ pub enum Element {
 #[derive(Clone, Debug)]
 pub enum Value {
     // 对于简单的 K-V，值就是一个 Element
-    Simple(Element), 
-    
+    Simple(Element),
+
     // 集合类型包含的是 Element 的集合
     List(VecDeque<Element>),
     Hash(HashMap<String, Element>), // Hash 的 value 也是 Element
@@ -39,9 +41,8 @@ pub struct ValueEntry {
 pub struct LockedDb<'a> {
     // 关键：它持有锁的守卫，但这个字段是私有的！
     // 外界无法通过 LockedDb 直接访问 guard.data
-    pub guard: tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>
+    pub guard: tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>,
 }
-
 
 // 我们的核心存储结构
 type DbStore = HashMap<String, ValueEntry>;
@@ -53,7 +54,7 @@ pub struct Db {
 }
 //其实理论上操作需要绑定数据 并且内聚的情况下。理论上操作db 就应该核心的方法收拾有db提供 外部不应该耦合到db内部
 //db内部就应该提供方法 如果外部执行指令 都需要调用db 也不错 就是如果无法接偶 db提供方法尽量底层 让外部拼接
-//也是不错的 如果就需要和db底层耦合比较多的情况下 那大部分方法 涉及底层操作 需要db的封装比较多 可以分开不同文件来增加可读性 
+//也是不错的 如果就需要和db底层耦合比较多的情况下 那大部分方法 涉及底层操作 需要db的封装比较多 可以分开不同文件来增加可读性
 impl Db {
     // 提供一个公共的构造函数
     pub fn new() -> Self {
@@ -63,11 +64,11 @@ impl Db {
 
     // 提供一个公共的、异步的 `get` 方法
     pub async fn get(&self, key: &str) -> Option<ValueEntry> {
-        let store: tokio::sync::RwLockReadGuard<'_, HashMap<String, ValueEntry>> = self.store.read().await;
+        let store: tokio::sync::RwLockReadGuard<'_, HashMap<String, ValueEntry>> =
+            self.store.read().await;
         // 这里的逻辑可能还包含检查 key 是否过期
         store.get(key).cloned() // 假设 ValueEntry 是 Clone 的
     }
-
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
     pub async fn lock(&self) -> LockedDb<'_> {
@@ -86,7 +87,8 @@ impl Db {
     where
         F: FnOnce() -> Pin<Box<dyn Future<Output = Result<(), KvError>> + Send>>,
     {
-        let mut store: tokio::sync::RwLockWriteGuard<'_, HashMap<String, ValueEntry>> = self.store.write().await;
+        let mut store: tokio::sync::RwLockWriteGuard<'_, HashMap<String, ValueEntry>> =
+            self.store.write().await;
         store.insert(key, value);
         if let Some(fun) = hook {
             match fun().await {
@@ -99,7 +101,7 @@ impl Db {
         Ok(())
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(),KvError>{
+    pub async fn delete(&self, key: &str) -> Result<(), KvError> {
         let mut store = self.store.write().await;
         store.remove(key);
         Ok(())
@@ -112,4 +114,30 @@ pub fn bytes_to_i64_fast(b: &Bytes) -> Option<i64> {
     // 直接告訴 parse 函數，你想解析成 i64
     let result = lexical_core::parse::<i64>(b);
     result.ok()
+}
+// 使用 OnceLock 来延迟初始化 START_TIME
+static START_TIME: OnceLock<Instant> = OnceLock::new();
+
+// 修正后的方法，返回一个可以存储的u64相对时间戳
+pub fn calculate_expiration_timestamp_ms(time_expire: u64) -> u64 {
+    let now = monotonic_time_ms();
+    now + time_expire
+}
+/// 获取从程序启动到现在的毫秒数（单调递增）
+pub fn monotonic_time_ms() -> u64 {
+    // 第一次调用 .get_or_init() 时，会执行 Instant::now() 并存储结果
+    // 之后的调用会直接返回已存储的值
+    let start_time = START_TIME.get_or_init(|| Instant::now());
+    start_time.elapsed().as_millis() as u64
+}
+
+//高效的int 转byte 方法
+pub fn parse_int_from_bytes(i: i64) -> Bytes {
+    let mut buffer = Buffer::new();
+
+    // 2. 将数字格式化到缓冲区中，返回一个指向缓冲区内容的 &str
+    let printed_str = buffer.format(i);
+
+    // 3. 从结果切片创建 Bytes (这里有一次复制，但避免了堆分配)
+    Bytes::copy_from_slice(printed_str.as_bytes())
 }

@@ -1,24 +1,28 @@
 use bytes::Bytes;
 
-use crate::db::{Element, LockedDb, ValueEntry, bytes_to_i64_fast};
+use crate::db::{bytes_to_i64_fast, monotonic_time_ms, parse_int_from_bytes, Element, LockedDb, ValueEntry};
 
 impl<'a> LockedDb<'a> {
-    pub fn set_string(&mut self, key: String, value: Bytes, time_expire: Option<u64>) {
-        let value_obj;
-        match bytes_to_i64_fast(&value) {
-            Some(i) => {
-                value_obj = ValueEntry {
-                    data: crate::db::Value::Simple(Element::Int(i)),
-                    expires_at: time_expire,
+    pub fn set_string(&mut self, key: String, value: ValueEntry, time_expire: Option<u64>) {
+        self.guard.insert(key, value);
+    }
+
+    pub fn get_string(&self, key: &str) -> Option<ValueEntry> {
+        if let Some(entry) = self.guard.get(key) {
+            let time_expires = entry.expires_at;
+            if let Some(expire_time) = time_expires {
+                if monotonic_time_ms() > expire_time {
+                    return None;
                 }
             }
-            None => {
-                value_obj = ValueEntry {
-                    data: crate::db::Value::Simple(Element::String(value)),
-                    expires_at: time_expire,
-                }
-            }
-        };
-        self.guard.insert(key, value_obj);
+            Some(entry.clone())
+            // match &entry.data {
+            //     crate::db::Value::Simple(Element::String(bytes)) => Some(bytes.clone()),
+            //     crate::db::Value::Simple(Element::Int(i)) => Some(parse_int_from_bytes(*i)),
+            //     _ => None,
+            // }
+        } else {
+            None
+        }
     }
 }

@@ -1,5 +1,7 @@
 use std::{sync::OnceLock, time::{Duration, Instant}};
 
+use bytes::Bytes;
+use itoa::Buffer;
 use tokio::sync::mpsc::Sender;
 
 use crate::{core_aof::AofMessage, db::Db, error::{Frame, KvError}};
@@ -37,4 +39,22 @@ pub fn calculate_expiration_timestamp_ms(expiration: &crate::error::Expiration) 
         crate::error::Expiration::PX(ms) => now + ms,
         crate::error::Expiration::EX(s) => now + s * 1000,
     }
+}
+//高效的int 转byte 方法
+pub fn parse_int_from_bytes(i: i64) -> Bytes {
+    let mut buffer = Buffer::new();
+
+    // 2. 将数字格式化到缓冲区中，返回一个指向缓冲区内容的 &str
+    let printed_str = buffer.format(i);
+
+    // 3. 从结果切片创建 Bytes (这里有一次复制，但避免了堆分配)
+    Bytes::copy_from_slice(printed_str.as_bytes())
+}
+
+// 一个直接从 Bytes 高效解析 i64 的函数
+pub fn bytes_to_i64_fast(b: &Bytes) -> Option<i64> {
+    // 顯式標註 result 變量的類型
+    // 直接告訴 parse 函數，你想解析成 i64
+    let result = lexical_core::parse::<i64>(b);
+    result.ok()
 }

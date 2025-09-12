@@ -3,7 +3,7 @@ use std::ops::Index;
 use crate::command_exchange::CommandExchange;
 use crate::error::Command::{Get, Ping, Set, Unimplement};
 use crate::error::KvError::ProtocolError;
-use crate::error::{Command, Expiration, Frame, KvError,  SetCommand, SetCondition};
+use crate::error::{Command, Expiration, Frame, GetCommand, KvError, SetCommand, SetCondition};
 use bytes::Bytes;
 
 impl TryFrom<Frame> for Command {
@@ -29,8 +29,7 @@ impl TryFrom<Frame> for Command {
                         if length != 2 {
                             return Err(ProtocolError("GET 命令需要 1 个参数".into()));
                         }
-                        let get_key = extract_bulk_string(iter.next())?;
-                        // Ok(Get(Get { key: get_k))
+                        GetCommand::exchange(iter)
                     }
                     "SET" => {
                         if length < 3 {

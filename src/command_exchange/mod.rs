@@ -4,6 +4,7 @@ use bytes::Bytes;
 
 use crate::error::{Command, Frame, KvError};
 pub mod string;
+pub mod common;
 /// 尝试从一个 Frame 中提取出 Bulk String 并转换为 String
 fn extract_bulk_string(frame: Option<Frame>) -> Result<String, KvError> {
     match frame {
@@ -28,5 +29,5 @@ fn extract_bulk_bytes(frame: Option<Frame>) -> Result<Bytes, KvError> {
 }
 
 pub trait CommandExchange {
-     fn exchange( itor: IntoIter<Frame>) -> Result<Command, KvError>;
+     fn exchange( itor: IntoIter<Frame>,command_name:String) -> Result<Command, KvError>;
 }

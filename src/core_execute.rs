@@ -1,12 +1,12 @@
-use crate::command_execute::{CommandContext, CommandExecutor};
 use crate::Db;
+use crate::command_execute::{CommandContext, CommandExecutor};
 use crate::core_aof::AofMessage;
 use crate::db::{Element, Value, ValueEntry};
 use crate::error::{Command, Expiration, Frame, IsAof, KvError, ToBulk};
 use bytes::Bytes;
 use itoa::Buffer;
 use std::f32::consts::E;
-use std::pin::Pin;
+use std::pin::{self, Pin};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
@@ -17,7 +17,7 @@ use tracing_subscriber::registry::Data;
 pub async fn execute_command(command: Command, db: &Db) -> Result<Frame, KvError> {
     // 在调用时直接转换 None 的类型
     // 这个调用现在是完全正确的，因为 `HookFn` 的定义和 `execute_command_hook` 的要求完美匹配
-    let result = execute_command_hook(command, db, None, IsAof::Yes).await;
+    let result = execute_command_hook(command, db, None).await;
     result
 }
 
@@ -25,28 +25,13 @@ pub async fn execute_command_hook(
     command: Command,
     db: &Db, // post_write_hook 是一个可选的闭包
     tx: Option<Sender<AofMessage>>,
-    // F 是闭包的类型
-    // Fut 是闭包返回的 Future 类型
-    is_aof: IsAof,
 ) -> Result<Frame, KvError> {
     let mut command_context = CommandContext { db, tx: &tx };
     match command {
-        Command::Get(get) => {
-            get.execute(&mut command_context).await
-        }
-        Command::Set(set) => {
-           set.execute(&mut command_context).await
-        }
-        Command::Ping(value) => {
-            if let Some(msg) = value {
-                Ok(Frame::Bulk(Bytes::from(msg)))
-            } else {
-                Ok(Frame::Simple("PONG".to_string()))
-            }
-        }
-        Command::Unimplement { command, .. } => {
-            Ok(Frame::Error(format!("ERR unknown command '{}'", command)))
-        }
+        Command::Get(get) => get.execute(&mut command_context).await,
+        Command::Set(set) => set.execute(&mut command_context).await,
+        Command::Ping(ping) => ping.execute(&mut command_context).await,
+        Command::Unimplement(unimplement) => unimplement.execute(&mut command_context).await,
     }
 }
 
@@ -63,7 +48,7 @@ pub async fn execute_command_normal(
     db: &Db,
     tx: Sender<AofMessage>, // 假设你已经改成了接收所有权的 Sender
 ) -> Result<Frame, KvError> {
-    let frame: Frame = execute_command_hook(command, db, Some(tx), IsAof::Yes).await?;
+    let frame: Frame = execute_command_hook(command, db, Some(tx)).await?;
     Ok(frame)
 }
 

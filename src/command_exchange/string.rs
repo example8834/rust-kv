@@ -3,7 +3,7 @@ use std::vec::IntoIter;
 use crate::{command_exchange::{extract_bulk_bytes, extract_bulk_integer, extract_bulk_string, CommandExchange}, error::{Command, Expiration, Frame, GetCommand, KvError, SetCommand, SetCondition}};
 
 impl CommandExchange for SetCommand {
-     fn exchange( mut itor: IntoIter<Frame>) -> Result<Command, KvError> {
+     fn exchange( mut itor: IntoIter<Frame>,_command_name:String) -> Result<Command, KvError> {
         let key = extract_bulk_string(itor.next())?;
         let value = extract_bulk_bytes(itor.next())?;
         let mut expiration: Option<Expiration> = None;
@@ -59,7 +59,7 @@ impl CommandExchange for SetCommand {
 }
 
 impl CommandExchange for GetCommand {
-    fn exchange(mut itor: IntoIter<Frame>) -> Result<Command, KvError> {
+    fn exchange(mut itor: IntoIter<Frame>,_command_name:String) -> Result<Command, KvError> {
         let key = extract_bulk_string(itor.next())?;
         Ok(Command::Get(GetCommand { key }))
     }

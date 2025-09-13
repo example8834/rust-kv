@@ -6,6 +6,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::{core_aof::AofMessage, db::Db, error::{Frame, KvError}};
 pub mod string;
+pub mod common;
 
 pub struct CommandContext<'a> {
     pub db: &'a Db,

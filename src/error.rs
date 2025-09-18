@@ -61,6 +61,8 @@ pub struct UnimplementCommand {
 pub enum Expiration {
     EX(u64), // 秒
     PX(u64), // 毫秒
+    EXAT(u64), // 秒
+    PXAT(u64), // 毫秒
 }
 
 #[derive(Debug,Clone)]

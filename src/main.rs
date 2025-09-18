@@ -6,10 +6,13 @@ mod error;
 pub mod db;
 pub mod command_execute;
 pub mod command_exchange;
+pub mod core_time;
+pub mod aof_exchange;
 
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
 use crate::core_execute::{execute_command_normal};
 use crate::core_explain::parse_frame;
+use crate::core_time::start_time_caching_task;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
 use bytes::{Buf, BytesMut};
@@ -45,7 +48,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             print!("aof数据恢复成功")
         }
     }
-
+    //开始时间获取任务
+    start_time_caching_task();
     // 2. 接受连接循环
     loop {
         // 等待一个新的客户端连接

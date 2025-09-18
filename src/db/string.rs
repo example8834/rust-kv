@@ -1,9 +1,9 @@
 use bytes::Bytes;
 
-use crate::db::{bytes_to_i64_fast, monotonic_time_ms, parse_int_from_bytes, Element, LockedDb, ValueEntry};
+use crate::{core_time::get_cached_time_ms, db::{bytes_to_i64_fast, parse_int_from_bytes, Element, LockedDb, ValueEntry}};
 
 impl<'a> LockedDb<'a> {
-    pub fn set_string(&mut self, key: String, value: ValueEntry, time_expire: Option<u64>) {
+    pub fn set_string(&mut self, key: String, value: ValueEntry) {
         self.guard.insert(key, value);
     }
 
@@ -11,7 +11,7 @@ impl<'a> LockedDb<'a> {
         if let Some(entry) = self.guard.get(key) {
             let time_expires = entry.expires_at;
             if let Some(expire_time) = time_expires {
-                if monotonic_time_ms() > expire_time {
+                if get_cached_time_ms() > expire_time {
                     return None;
                 }
             }

@@ -32,6 +32,28 @@ impl CommandExchange for SetCommand {
                         return Err(KvError::ProtocolError("EX 需要一个时间参数".into()));
                     }
                 }
+                Frame::Bulk(ref bytes) if bytes.eq_ignore_ascii_case(b"PXAT") => {
+                    if let Some(time_frame) = itor.next() {
+                        let time = extract_bulk_integer(Some(time_frame))?;
+                        if time <= 0 {
+                            return Err(KvError::ProtocolError("PXAT 过期时间必须大于 0".into()));
+                        }
+                        expiration = Some(Expiration::PXAT(time as u64));
+                    } else {
+                        return Err(KvError::ProtocolError("PXAT 需要一个时间参数".into()));
+                    }
+                }
+                Frame::Bulk(ref bytes) if bytes.eq_ignore_ascii_case(b"EXAT") =>{
+                    if let Some(time_frame) = itor.next() {
+                        let time = extract_bulk_integer(Some(time_frame))?;
+                        if time <= 0 {
+                            return Err(KvError::ProtocolError("EXAT 过期时间必须大于 0".into()));
+                        }
+                        expiration = Some(Expiration::EXAT(time as u64));
+                    } else {
+                        return Err(KvError::ProtocolError("EXAT 需要一个时间参数".into()));
+                    }
+                }
                 Frame::Bulk(ref bytes) if bytes.eq_ignore_ascii_case(b"NX") => {
                     if condition.is_some() {
                         return Err(KvError::ProtocolError("只能指定 NX 或 XX 中的一个".into()));

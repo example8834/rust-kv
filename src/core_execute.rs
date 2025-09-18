@@ -35,13 +35,6 @@ pub async fn execute_command_hook(
     }
 }
 
-pub fn str_to_bluk(bulk: ToBulk) -> Frame {
-    match bulk {
-        ToBulk::String(e) => Frame::Bulk(Bytes::from(e)),
-        ToBulk::Btyes(bytes) => Frame::Bulk(bytes),
-        ToBulk::Integer(integer) => Frame::Integer(integer),
-    }
-}
 // AI 提供的正确代码，我帮你整理并解释
 pub async fn execute_command_normal(
     command: Command,
@@ -52,13 +45,7 @@ pub async fn execute_command_normal(
     Ok(frame)
 }
 
-/// 一个直接从 Bytes 高效解析 i64 的函数
-fn bytes_to_i64_fast(b: &Bytes) -> Option<i64> {
-    // 顯式標註 result 變量的類型
-    // 直接告訴 parse 函數，你想解析成 i64
-    let result = lexical_core::parse::<i64>(b);
-    result.ok()
-}
+
 
 impl Frame {
     pub fn serialize(&self) -> Vec<u8> {
@@ -82,24 +69,4 @@ impl Frame {
             }
         }
     }
-}
-/// 获取当前时间的毫秒级 UNIX 时间戳 (u64)
-fn current_timestamp_ms() -> u64 {
-    // 1. 获取当前的 SystemTime
-    let now = SystemTime::now();
-
-    // 2. 计算从 UNIX 纪元到现在的持续时间 (Duration)
-    // .duration_since() 会返回一个 Result，因为如果系统时间被设置到了 1970 年以前，
-    // 这个操作会失败。对于服务器来说，这种情况属于灾难性的系统配置错误，
-    // 直接 unwrap() 让程序 panic 是一个合理的选择。
-    let duration_since_epoch = now
-        .duration_since(UNIX_EPOCH)
-        .expect("System time is before the UNIX epoch, please check your system clock!");
-
-    // 3. 将 Duration 转换为毫秒。as_millis() 返回一个 u128，
-    // 这是为了防止未来几千年后的时间戳溢出 u64。
-    let millis_u128 = duration_since_epoch.as_millis();
-
-    // 4. 在当前和可预见的未来，这个值可以安全地转换为 u64。
-    millis_u128 as u64
 }

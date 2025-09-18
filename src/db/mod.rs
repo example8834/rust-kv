@@ -115,21 +115,6 @@ pub fn bytes_to_i64_fast(b: &Bytes) -> Option<i64> {
     let result = lexical_core::parse::<i64>(b);
     result.ok()
 }
-// 使用 OnceLock 来延迟初始化 START_TIME
-static START_TIME: OnceLock<Instant> = OnceLock::new();
-
-// 修正后的方法，返回一个可以存储的u64相对时间戳
-pub fn calculate_expiration_timestamp_ms(time_expire: u64) -> u64 {
-    let now = monotonic_time_ms();
-    now + time_expire
-}
-/// 获取从程序启动到现在的毫秒数（单调递增）
-pub fn monotonic_time_ms() -> u64 {
-    // 第一次调用 .get_or_init() 时，会执行 Instant::now() 并存储结果
-    // 之后的调用会直接返回已存储的值
-    let start_time = START_TIME.get_or_init(|| Instant::now());
-    start_time.elapsed().as_millis() as u64
-}
 
 //高效的int 转byte 方法
 pub fn parse_int_from_bytes(i: i64) -> Bytes {

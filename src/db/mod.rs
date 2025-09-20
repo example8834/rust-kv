@@ -41,7 +41,12 @@ pub struct ValueEntry {
 pub struct LockedDb<'a> {
     // 关键：它持有锁的守卫，但这个字段是私有的！
     // 外界无法通过 LockedDb 直接访问 guard.data
-    pub guard: tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>,
+    pub guard: LockType<'a>,
+}
+
+pub enum LockType<'a> {
+    Write(tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>),
+    Read(tokio::sync::RwLockReadGuard<'a, HashMap<String, ValueEntry>>),
 }
 
 // 我们的核心存储结构
@@ -62,43 +67,21 @@ impl Db {
         Self::default()
     }
 
-    // 提供一个公共的、异步的 `get` 方法
-    pub async fn get(&self, key: &str) -> Option<ValueEntry> {
-        let store: tokio::sync::RwLockReadGuard<'_, HashMap<String, ValueEntry>> =
-            self.store.read().await;
-        // 这里的逻辑可能还包含检查 key 是否过期
-        store.get(key).cloned() // 假设 ValueEntry 是 Clone 的
-    }
+
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
-    pub async fn lock(&self) -> LockedDb<'_> {
+    pub async fn lock_write(&self) -> LockedDb<'_> {
+        //这里是创建 出来的这个db
         LockedDb {
-            guard: self.store.write().await,
+            guard: LockType::Write(self.store.write().await),
         }
     }
 
-    // 提供一个公共的、异步的 `set` 方法
-    pub async fn set<F>(
-        &self,
-        key: String,
-        value: ValueEntry,
-        hook: Option<F>,
-    ) -> Result<(), KvError>
-    where
-        F: FnOnce() -> Pin<Box<dyn Future<Output = Result<(), KvError>> + Send>>,
-    {
-        let mut store: tokio::sync::RwLockWriteGuard<'_, HashMap<String, ValueEntry>> =
-            self.store.write().await;
-        store.insert(key, value);
-        if let Some(fun) = hook {
-            match fun().await {
-                Ok(_) => {}
-                Err(e) => {
-                    return Err(e.into());
-                }
-            };
+    pub async fn lock_read(&self) -> LockedDb<'_> {
+        //这里是创建 出来的这个db
+        LockedDb {
+            guard: LockType::Read(self.store.read().await),
         }
-        Ok(())
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), KvError> {

@@ -1,16 +1,14 @@
 use bytes::Bytes;
 
 use crate::{
-    aof_exchange::{exchange_absolute_time, parse_int_from_bytes, CommandAofExchange},
-    core_time::get_cached_time_ms,
-    error::{Frame, KvError, SetCommand},
+    aof_exchange::{exchange_absolute_time, parse_int_from_bytes, CommandAofExchange}, command_execute::CommandContext, core_time::get_cached_time_ms, error::{Frame, KvError, SetCommand}
 };
 
 impl CommandAofExchange for SetCommand {
     async fn execute_aof<'ctx>(
         self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: &'ctx mut crate::command_execute::CommandContext<'ctx>,
+        ctx: &'ctx CommandContext<'ctx>
     ) -> Result<Frame, KvError> {
         let mut frame_vec = vec![crate::error::Frame::Bulk(Bytes::from("SET".to_string()))];
         frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.key.clone())));

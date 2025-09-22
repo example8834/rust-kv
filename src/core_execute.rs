@@ -28,10 +28,10 @@ pub async fn execute_command_hook(
 ) -> Result<Frame, KvError> {
     let mut command_context = CommandContext { db, tx: &tx };
     match command {
-        Command::Get(get) => get.execute(&mut command_context).await,
-        Command::Set(set) => set.execute(&mut command_context).await,
-        Command::Ping(ping) => ping.execute(&mut command_context).await,
-        Command::Unimplement(unimplement) => unimplement.execute(&mut command_context).await,
+        Command::Get(get) => get.execute(&command_context).await,
+        Command::Set(set) => set.execute(&command_context).await,
+        Command::Ping(ping) => ping.execute( &command_context).await,
+        Command::Unimplement(unimplement) => unimplement.execute(& command_context).await,
     }
 }
 

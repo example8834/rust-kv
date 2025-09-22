@@ -7,6 +7,7 @@ use std::{
     time::Instant,
 };
 pub mod string;
+pub mod eviction;
 // 确保有这行
 use tokio::sync::RwLock;
 
@@ -34,6 +35,7 @@ pub enum Value {
 pub struct ValueEntry {
     pub data: Value,
     pub expires_at: Option<u64>, // u64 用来存过期时间点的时间戳
+    pub eviction_metadata: u64,      // 32位记录最近访问时间戳 后32 记录访问次数
 }
 
 // 这是一个新的、公开的结构体

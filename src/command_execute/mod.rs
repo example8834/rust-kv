@@ -22,12 +22,28 @@ pub struct CommandContext<'a> {
 }
 
 pub trait CommandExecutor {
-    // execute 方法現在接收 CommandContext 作為參數！
-    fn execute<'ctx>(
-        self,
-        // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: &'ctx mut CommandContext<'ctx>,
-    ) -> impl std::future::Future<Output = Result<Frame, KvError>> + Send;
+      // 模板方法
+    async fn execute<'ctx>(
+        &self,
+        // ✅ 核心改动：从 &mut CommandContext 变成了 &CommandContext
+        ctx: &'ctx CommandContext<'ctx>,
+    ) -> Result<Frame, KvError> ;
+
+    // “原语”方法
+    // async fn execute_data_resolve<'ctx>(
+    //     &self,
+    //     // ✅ 同步修改
+    //     ctx: &'ctx CommandContext<'ctx>,
+    // ) -> Result<Frame, KvError>;
+
+    // // “钩子”方法
+    // async fn execute_db<'ctx>(
+    //     &self,
+    //     // ✅ 同步修改
+    //     ctx: &'ctx CommandContext<'ctx>,
+    // ) -> Result<Frame, KvError> {
+    //     Ok(Frame::Simple("OK".to_string()))
+    // }
 }
 // 修正后的方法，返回一个可以存储的u64相对时间戳
 pub fn calculate_expiration_timestamp_ms(expiration: &crate::error::Expiration) -> u64 {

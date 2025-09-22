@@ -16,7 +16,7 @@ pub trait CommandAofExchange {
      fn execute_aof<'ctx>(
         self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: &'ctx mut CommandContext<'ctx>,
+        ctx: &'ctx CommandContext<'ctx>,
     ) -> impl std::future::Future<Output = Result<Frame, KvError>> + Send;
 }
 

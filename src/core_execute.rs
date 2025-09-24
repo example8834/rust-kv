@@ -26,7 +26,7 @@ pub async fn execute_command_hook(
     db: &Db, // post_write_hook 是一个可选的闭包
     tx: Option<Sender<AofMessage>>,
 ) -> Result<Frame, KvError> {
-    let mut command_context = CommandContext { db, tx: &tx };
+    let  command_context = CommandContext { db, tx: &tx };
     match command {
         Command::Get(get) => get.execute(&command_context).await,
         Command::Set(set) => set.execute(&command_context).await,

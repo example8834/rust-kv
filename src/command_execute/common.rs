@@ -3,7 +3,7 @@ use bytes::Bytes;
 use crate::{command_execute::{CommandContext, CommandExecutor}, error::{Frame, KvError, PingCommand, UnimplementCommand}};
 
 impl CommandExecutor for PingCommand {
-    async fn execute<'ctx>(&self, _ctx: &'ctx CommandContext<'ctx>) -> Result<Frame, KvError> {
+    async fn execute<'ctx>(self, _ctx: &'ctx CommandContext<'ctx>) -> Result<Frame, KvError> {
         if let Some(value) = &self.value {
             Ok(Frame::Bulk(Bytes::from(value.clone())))
         } else {
@@ -15,7 +15,7 @@ impl CommandExecutor for PingCommand {
 
 impl CommandExecutor for UnimplementCommand {
     async fn execute<'ctx>(
-        &self,
+        self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
         _ctx: &'ctx CommandContext<'ctx>
     ) -> Result<Frame, KvError> {

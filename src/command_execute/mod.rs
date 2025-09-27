@@ -23,11 +23,11 @@ pub struct CommandContext<'a> {
 
 pub trait CommandExecutor {
       // 模板方法
-    async fn execute<'ctx>(
+    fn execute<'ctx>(
         self,
         // ✅ 核心改动：从 &mut CommandContext 变成了 &CommandContext
         ctx: &'ctx CommandContext<'ctx>,
-    ) -> Result<Frame, KvError> ;
+    ) -> impl std::future::Future<Output = Result<Frame, KvError>> + Send ;
 
     // “原语”方法
     // async fn execute_data_resolve<'ctx>(

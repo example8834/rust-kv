@@ -1,13 +1,27 @@
-use std::collections::HashMap;
+use std::{
+    collections::{BinaryHeap, HashMap},
+    sync::Arc,
+};
 
 use crate::db::{LockType, LockedDb, ValueEntry};
+pub mod lfu_cache;
+pub mod lru_cache;
+
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct TtlEntry {
+    expires_at: u64,
+    key: Arc<String>,
+}
+
+pub struct EvictionManager {
+    ttl_heap: BinaryHeap<TtlEntry>,
+}
 
 // 假设 LockedDb 包含 db 的引用和 guard
 impl<'a> LockedDb<'a> {
     // 一个通用的、处理【写操作】的模板方法
     pub fn execute_write_op<F>(&mut self, key: String, value: ValueEntry, mut operation: F)
     where
-
         //    它接收一个对底层 HashMap 的【可变引用】
         F: FnMut(String, ValueEntry, &mut HashMap<String, ValueEntry>),
     {
@@ -22,13 +36,12 @@ impl<'a> LockedDb<'a> {
 
         // 2. 执行由调用者传入的、具体的数据操作
         operation(key, value, map);
-
+        
         // log::info!(...);             // 比如，自动写日志
     }
 
     // 一个通用的、处理【写操作】的模板方法
-    pub fn execute_read_op<F>(& self, key: String,   operation: F)
-    -> Option<ValueEntry>
+    pub fn execute_read_op<F>(&self, key: String, operation: F) -> Option<ValueEntry>
     where
         //    它接收一个对底层 HashMap 的【可变引用】
         F: FnOnce(String, &HashMap<String, ValueEntry>) -> Option<ValueEntry>,

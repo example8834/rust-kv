@@ -3,7 +3,7 @@ use bytes::Bytes;
 use crate::{
     aof_exchange::CommandAofExchange, command_execute::{
         bytes_to_i64_fast, calculate_expiration_timestamp_ms, parse_int_from_bytes, CommandContext, CommandExecutor
-    }, db::{Element, ValueEntry}, error::{Command, Expiration, Frame, GetCommand, KvError, SetCommand, ToBulk}
+    }, error::{Command, Expiration, Frame, GetCommand, KvError, SetCommand, ToBulk}, types::{Element, Value, ValueEntry}
 };
 
 impl CommandExecutor for SetCommand {
@@ -21,14 +21,14 @@ impl CommandExecutor for SetCommand {
         match bytes_to_i64_fast(&self.value) {
             Some(i) => {
                 value_obj = ValueEntry {
-                    data: crate::db::Value::Simple(Element::Int(i)),
+                    data: Value::Simple(Element::Int(i)),
                     expires_at: time_expire,
                     eviction_metadata: todo!(),
                 }
             }
             None => {
                 value_obj = ValueEntry {
-                    data: crate::db::Value::Simple(Element::String(self.value)),
+                    data: Value::Simple(Element::String(self.value)),
                     expires_at: time_expire,
                     eviction_metadata: todo!(),
                 }
@@ -59,11 +59,11 @@ impl CommandExecutor for GetCommand {
 
                 //这是处理字符串的方法
                 match data {
-                    crate::db::Value::Simple(crate::db::Element::String(bytes)) => {
+                    Value::Simple(Element::String(bytes)) => {
                         Ok(Frame::Bulk(bytes))
                     }
                     //性能优化
-                    crate::db::Value::Simple(crate::db::Element::Int(i)) => {
+                    Value::Simple(Element::Int(i)) => {
                         let bytes = parse_int_from_bytes(i);
                         Ok(Frame::Bulk(Bytes::from(bytes)))
                     }

@@ -11,13 +11,13 @@ use crate::{
     core_aof::AofMessage,
     core_time::get_cached_time_ms,
     db::Db,
-    error::{Frame, KvError},
+    error::{Frame, KvError}, types::Storage,
 };
-pub mod common;
-pub mod string;
+ mod common;
+ mod string;
 
 pub struct CommandContext<'a> {
-    pub db: &'a Db,
+    pub db: &'a Storage,
     pub tx: &'a Option<Sender<AofMessage>>,
 }
 

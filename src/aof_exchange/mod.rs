@@ -9,7 +9,7 @@ use crate::{
     error::{Frame, KvError},
 };
 
-pub mod string;
+mod string;
 
 pub trait CommandAofExchange {
     // execute 方法現在接收 CommandContext 作為參數！

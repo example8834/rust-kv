@@ -3,7 +3,8 @@ use std::{
     sync::Arc,
 };
 
-use crate::db::{LockType, LockedDb, ValueEntry};
+use crate::types::{LockType, LockedDb, ValueEntry};
+
 pub mod lfu_cache;
 pub mod lru_cache;
 
@@ -12,9 +13,19 @@ pub struct TtlEntry {
     expires_at: u64,
     key: Arc<String>,
 }
-
+#[derive(Default, Debug)]
 pub struct EvictionManager {
-    ttl_heap: BinaryHeap<TtlEntry>,
+    pub(crate) ttl_heap: BinaryHeap<TtlEntry>,
+}
+
+
+impl EvictionManager {
+    // 这里可以添加 EvictionManager 的方法，比如处理过期键
+  // 提供一个公共的构造函数
+    pub fn new() -> Self {
+        // ... 你的初始化逻辑，比如启动后台任务 ...
+        Self::default()
+    }
 }
 
 // 假设 LockedDb 包含 db 的引用和 guard

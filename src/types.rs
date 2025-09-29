@@ -1,0 +1,52 @@
+use std::{collections::{HashMap, HashSet, VecDeque}, sync::Arc};
+
+use bytes::Bytes;
+use tokio::sync::RwLock;
+
+//结构共享的模块
+#[derive(Clone, Debug, PartialEq, Eq, Hash)] // 需要派生 Hash 和 Eq 才能用于 HashSet
+pub enum Element {
+    String(Bytes),
+    Int(i64),
+}
+
+// 第二步：修改顶层的 Value 枚举，让集合类型使用 Element
+#[derive(Clone, Debug)]
+pub enum Value {
+    // 对于简单的 K-V，值就是一个 Element
+    Simple(Element),
+
+    // 集合类型包含的是 Element 的集合
+    List(VecDeque<Element>),
+    Hash(HashMap<String, Element>), // Hash 的 value 也是 Element
+    Set(HashSet<Element>),
+}
+// 1. 让 Value 枚举本身可以 Clone
+#[derive(Clone, Debug)]
+pub struct ValueEntry {
+    pub data: Value,
+    pub expires_at: Option<u64>, // u64 用来存过期时间点的时间戳
+    pub eviction_metadata: u64,      // 32位记录最近访问时间戳 后32 记录访问次数
+}
+
+// 这是一个新的、公开的结构体
+// 它的生命周期 'a 被绑定到它持有的 MutexGuard
+pub struct LockedDb<'a> {
+    // 关键：它持有锁的守卫，但这个字段是私有的！
+    // 外界无法通过 LockedDb 直接访问 guard.data
+    pub guard: LockType<'a>,
+}
+
+pub enum LockType<'a> {
+    Write(tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>),
+    Read(tokio::sync::RwLockReadGuard<'a, HashMap<String, ValueEntry>>),
+}
+
+// 我们的核心存储结构
+type DbStore = HashMap<String, ValueEntry>;
+
+// 把 Arc<Mutex<...>> 封装到一个新结构里，这是个好习惯
+#[derive(Clone, Default)]
+pub struct Storage {
+    pub(crate) store: Arc<RwLock<DbStore>>,
+}

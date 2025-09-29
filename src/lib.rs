@@ -1,19 +1,21 @@
+mod aof_exchange;
+mod command_exchange;
+mod command_execute;
 mod core_aof;
 mod core_exchange;
 mod core_execute;
 mod core_explain;
+mod core_time;
+mod db;
 mod error;
-pub mod db;
-pub mod command_execute;
-pub mod command_exchange;
-pub mod core_time;
-pub mod aof_exchange;
-pub mod server;
+mod server;
+mod types;
 
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
-use crate::core_execute::{execute_command_normal};
+use crate::core_execute::execute_command_normal;
 use crate::core_explain::parse_frame;
 use crate::core_time::start_time_caching_task;
+use crate::db::Db;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
 use crate::server::handle_connection;
@@ -22,8 +24,6 @@ use std::error::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, Sender};
-use db::Db;
-
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
     // 创建一个容量为 1024 的管道
@@ -40,9 +40,9 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     println!("服务器启动，监听于 127.0.0.1:6379");
 
     //创建db
-    let db = Db::default();
-
-    match explain_execute_aofcommand(aop_file_path, &db).await {
+    let db = Db::new();
+    let storage = db.store.clone();
+    match explain_execute_aofcommand(aop_file_path, &storage).await {
         Err(e) => {
             panic!("aof 清理失败  {}", e)
         }
@@ -57,7 +57,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         // 等待一个新的客户端连接
         let (socket, _) = listener.accept().await?;
         tracing::info!("接收到新连接");
-        let db = db.clone();
+        let db = db.store.clone();
         let tx_clone = tx.clone();
         // 3. 为每个连接生成一个新的异步任务
         tokio::spawn(async move {

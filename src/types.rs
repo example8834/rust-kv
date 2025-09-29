@@ -21,27 +21,13 @@ pub enum Value {
     Hash(HashMap<String, Element>), // Hash 的 value 也是 Element
     Set(HashSet<Element>),
 }
-// 1. 让 Value 枚举本身可以 Clone
+
 #[derive(Clone, Debug)]
 pub struct ValueEntry {
     pub data: Value,
     pub expires_at: Option<u64>, // u64 用来存过期时间点的时间戳
     pub eviction_metadata: u64,      // 32位记录最近访问时间戳 后32 记录访问次数
 }
-
-// 这是一个新的、公开的结构体
-// 它的生命周期 'a 被绑定到它持有的 MutexGuard
-pub struct LockedDb<'a> {
-    // 关键：它持有锁的守卫，但这个字段是私有的！
-    // 外界无法通过 LockedDb 直接访问 guard.data
-    pub guard: LockType<'a>,
-}
-
-pub enum LockType<'a> {
-    Write(tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>),
-    Read(tokio::sync::RwLockReadGuard<'a, HashMap<String, ValueEntry>>),
-}
-
 // 我们的核心存储结构
 type DbStore = HashMap<String, ValueEntry>;
 

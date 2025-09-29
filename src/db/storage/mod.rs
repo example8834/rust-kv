@@ -11,7 +11,25 @@ pub mod string;
 // 确保有这行
 use tokio::sync::RwLock;
 
-use crate::{error::KvError, types::{LockType, LockedDb, Storage}};
+use crate::{error::KvError, types::{ Storage, ValueEntry}};
+
+
+// 1. 让 Value 枚举本身可以 Clone
+
+// 这是一个新的、公开的结构体
+// 它的生命周期 'a 被绑定到它持有的 MutexGuard
+pub struct LockedDb<'a> {
+    // 关键：它持有锁的守卫，但这个字段是私有的！
+    // 外界无法通过 LockedDb 直接访问 guard.data
+    pub guard: LockType<'a>,
+}
+
+pub enum LockType<'a> {
+    Write(tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>),
+    Read(tokio::sync::RwLockReadGuard<'a, HashMap<String, ValueEntry>>),
+}
+
+
 
 //其实理论上操作需要绑定数据 并且内聚的情况下。理论上操作db 就应该核心的方法收拾有db提供 外部不应该耦合到db内部
 //db内部就应该提供方法 如果外部执行指令 都需要调用db 也不错 就是如果无法接偶 db提供方法尽量底层 让外部拼接

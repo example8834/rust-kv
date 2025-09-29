@@ -3,10 +3,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::types::{LockType, LockedDb, ValueEntry};
+use crate::{db::storage::{LockType, LockedDb}, types::ValueEntry};
 
-pub mod lfu_cache;
-pub mod lru_cache;
+mod lfu_cache;
+mod lru_cache;
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct TtlEntry {

@@ -14,7 +14,7 @@ use tokio::sync::mpsc::Sender;
 use tracing_subscriber::registry::Data;
 
 // 假定：Command: Clone
-pub async fn execute_command(command: Command, db: &Storage) -> Result<Frame, KvError> {
+pub async fn execute_command(command: Command, db: &Db) -> Result<Frame, KvError> {
     // 在调用时直接转换 None 的类型
     // 这个调用现在是完全正确的，因为 `HookFn` 的定义和 `execute_command_hook` 的要求完美匹配
     let result = execute_command_hook(command, db, None).await;
@@ -23,10 +23,10 @@ pub async fn execute_command(command: Command, db: &Storage) -> Result<Frame, Kv
 
 pub async fn execute_command_hook(
     command: Command,
-    db: &Storage, // post_write_hook 是一个可选的闭包
+    db: &Db, // post_write_hook 是一个可选的闭包
     tx: Option<Sender<AofMessage>>,
 ) -> Result<Frame, KvError> {
-    let  command_context = CommandContext { db, tx: &tx };
+    let  command_context = CommandContext { db:&db, tx: &tx };
     match command {
         Command::Get(get) => get.execute(&command_context).await,
         Command::Set(set) => set.execute(&command_context).await,
@@ -38,7 +38,7 @@ pub async fn execute_command_hook(
 // AI 提供的正确代码，我帮你整理并解释
 pub async fn execute_command_normal(
     command: Command,
-    db: &Storage,
+    db: &Db,
     tx: Sender<AofMessage>, // 假设你已经改成了接收所有权的 Sender
 ) -> Result<Frame, KvError> {
     let frame: Frame = execute_command_hook(command, db, Some(tx)).await?;

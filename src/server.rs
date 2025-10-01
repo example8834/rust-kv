@@ -2,11 +2,13 @@ use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
 use crate::core_execute::{execute_command_normal};
 use crate::core_explain::parse_frame;
 use crate::core_time::start_time_caching_task;
+use crate::db::Db;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
 use crate::types::Storage;
 use bytes::{Buf, BytesMut};
 use std::error::Error;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, Sender};
@@ -15,7 +17,7 @@ use tokio::sync::mpsc::{self, Sender};
 // 处理单个客户端连接的函数
 pub async fn handle_connection(
     mut socket: TcpStream,
-    db: Storage,
+    db: Db,
     tx: Sender<AofMessage>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // 1. 使用 Vec<u8> 作为缓冲区
@@ -78,7 +80,7 @@ pub async fn handle_connection(
 
 async fn explain_execute_command(
     buf: &mut BytesMut,
-    db: &Storage,
+    db: &Db,
     tx: &Sender<AofMessage>,
 ) -> Result<Vec<Vec<u8>>, Box<dyn Error + Send + Sync>> {
     let mut vec_result: Vec<Vec<u8>> = Vec::new();

@@ -10,6 +10,9 @@ impl CommandAofExchange for SetCommand {
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
         ctx: &'ctx CommandContext<'ctx>
     ) -> Result<Frame, KvError> {
+        if ctx.tx.is_none(){
+            return Ok(Frame::Simple("OK".to_string()));
+        }
         let mut frame_vec = vec![crate::error::Frame::Bulk(Bytes::from("SET".to_string()))];
         frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.key.clone())));
         frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.value.clone())));

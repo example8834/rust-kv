@@ -17,7 +17,7 @@ use crate::{
  mod string;
 
 pub struct CommandContext<'a> {
-    pub db: &'a Storage,
+    pub db: &'a Db,
     pub tx: &'a Option<Sender<AofMessage>>,
 }
 

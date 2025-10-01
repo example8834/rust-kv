@@ -3,6 +3,8 @@ use std::{
     sync::Arc,
 };
 
+use tokio::sync::RwLock;
+
 use crate::{db::storage::{LockType, LockedDb}, types::ValueEntry};
 
 mod lfu_cache;
@@ -13,9 +15,9 @@ pub struct TtlEntry {
     expires_at: u64,
     key: Arc<String>,
 }
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct EvictionManager {
-    pub(crate) ttl_heap: BinaryHeap<TtlEntry>,
+    pub ttl_heap: Arc<RwLock<BinaryHeap<TtlEntry>>>,
 }
 
 

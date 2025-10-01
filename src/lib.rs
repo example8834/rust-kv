@@ -21,6 +21,7 @@ use crate::error::{Command, Frame, KvError};
 use crate::server::handle_connection;
 use bytes::{Buf, BytesMut};
 use std::error::Error;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, Sender};
@@ -41,8 +42,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     //创建db
     let db = Db::new();
-    let storage = db.store.clone();
-    match explain_execute_aofcommand(aop_file_path, &storage).await {
+    match explain_execute_aofcommand(aop_file_path, &db).await {
         Err(e) => {
             panic!("aof 清理失败  {}", e)
         }
@@ -57,7 +57,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         // 等待一个新的客户端连接
         let (socket, _) = listener.accept().await?;
         tracing::info!("接收到新连接");
-        let db = db.store.clone();
+        let db = db.clone();
         let tx_clone = tx.clone();
         // 3. 为每个连接生成一个新的异步任务
         tokio::spawn(async move {

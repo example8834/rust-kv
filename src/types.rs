@@ -32,6 +32,7 @@ pub struct ValueEntry {
 type DbStore = HashMap<String, ValueEntry>;
 
 // 把 Arc<Mutex<...>> 封装到一个新结构里，这是个好习惯
+// 这个数组
 #[derive(Clone, Default)]
 pub struct Storage {
     pub(crate) store: Arc<RwLock<DbStore>>,

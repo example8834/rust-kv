@@ -65,7 +65,7 @@ pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str) {
 
 pub async fn explain_execute_aofcommand(
     path: &str,
-    db: &Storage,
+    db: &Db,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut file = File::open(path)?;
     //单线程恢复可以很大

@@ -11,7 +11,7 @@ pub mod string;
 // 确保有这行
 use tokio::sync::RwLock;
 
-use crate::{error::KvError, types::{ Storage, ValueEntry}};
+use crate::{error::KvError, types::{ ConnectionState, Storage, ValueEntry}};
 
 
 // 1. 让 Value 枚举本身可以 Clone
@@ -25,8 +25,8 @@ pub struct LockedDb<'a> {
 }
 
 pub enum LockType<'a> {
-    Write(tokio::sync::RwLockWriteGuard<'a, HashMap<String, ValueEntry>>),
-    Read(tokio::sync::RwLockReadGuard<'a, HashMap<String, ValueEntry>>),
+    Write(tokio::sync::RwLockWriteGuard<'a, HashMap<Arc<String>, ValueEntry>>),
+    Read(tokio::sync::RwLockReadGuard<'a, HashMap<Arc<String>, ValueEntry>>),
 }
 
 
@@ -44,25 +44,20 @@ impl Storage {
 
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
-    pub async fn lock_write(&self) -> LockedDb<'_> {
+    pub async fn lock_write(&self,connect_state:& mut ConnectionState) -> LockedDb<'_> {
         //这里是创建 出来的这个db
         LockedDb {
-            guard: LockType::Write(self.store.write().await),
+            guard: LockType::Write(self.store.get(connect_state.selected_db).unwrap().write().await),
         }
     }
 
-    pub async fn lock_read(&self) -> LockedDb<'_> {
+    pub async fn lock_read(&self,connect_state:& mut ConnectionState) -> LockedDb<'_> {
         //这里是创建 出来的这个db
         LockedDb {
-            guard: LockType::Read(self.store.read().await),
+            guard: LockType::Read(self.store.get(connect_state.selected_db).unwrap().read().await),
         }
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), KvError> {
-        let mut store = self.store.write().await;
-        store.remove(key);
-        Ok(())
-    }
 }
 
 // 一个直接从 Bytes 高效解析 i64 的函数

@@ -10,7 +10,7 @@ use tokio::time::{self, Duration};
 use crate::core_execute::{ execute_command};
 use crate::core_explain::parse_frame;
 use crate::error::{Command};
-use crate::types::Storage;
+use crate::types::{ConnectionState, Storage};
 use crate::Db;
 
 
@@ -74,6 +74,8 @@ pub async fn explain_execute_aofcommand(
     let mut file_data_ref = &mut file_data[..];
     let mut exec_time;
     let mut tail_file_length = 0;
+    //这个默认恢复从0 开始 
+    let mut conn_state = ConnectionState { selected_db: 0 };
     loop {
         let size: usize = file.read(file_data_ref)? + tail_file_length;
         let mut tail_size: usize = 0;
@@ -94,7 +96,7 @@ pub async fn explain_execute_aofcommand(
                     Some((frame, size)) => {
                         match Command::try_from(frame) {
                             Ok(frame) => {
-                                execute_command(frame, db).await?;
+                                execute_command(frame, db,&mut conn_state).await?;
                                 data = &data[size..];
                                 exec_time += 1;
                             }

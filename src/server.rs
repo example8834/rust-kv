@@ -5,7 +5,7 @@ use crate::core_time::start_time_caching_task;
 use crate::db::Db;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
-use crate::types::Storage;
+use crate::types::{ConnectionState, Storage};
 use bytes::{Buf, BytesMut};
 use std::error::Error;
 use std::sync::Arc;
@@ -24,9 +24,11 @@ pub async fn handle_connection(
     let mut buf = BytesMut::with_capacity(1024);
     // 目前来说用的模式是1 是 redis 格式 0 是单个字符模式
     let type_fix = 1;
+    //连接状态
+    let mut conn_state = ConnectionState { selected_db: 0 };
     // 4. 在该连接的循环中读取数据
     loop {
-        let n = socket.read_buf(&mut buf).await?;
+        let n: usize = socket.read_buf(&mut buf).await?;
 
         // 如果 read 返回 0，表示客户端关闭了连接
         if n == 0 {
@@ -48,7 +50,7 @@ pub async fn handle_connection(
             }
         } else {
             println!("{:?}", std::str::from_utf8(&buf));
-            match explain_execute_command(&mut buf, &db, &tx).await {
+            match explain_execute_command(&mut buf, &db, &tx,&mut conn_state).await {
                 Ok(result) => {
                     print!("{}",result.len());
                     for item in result {
@@ -82,6 +84,7 @@ async fn explain_execute_command(
     buf: &mut BytesMut,
     db: &Db,
     tx: &Sender<AofMessage>,
+    command_context:& mut ConnectionState
 ) -> Result<Vec<Vec<u8>>, Box<dyn Error + Send + Sync>> {
     let mut vec_result: Vec<Vec<u8>> = Vec::new();
     let mut vec: &[u8] = buf.as_ref();
@@ -108,7 +111,7 @@ async fn explain_execute_command(
             Ok(frame) => match frame {
                 _ => {
                     //这个事指令错误 而不是结构化错误
-                    let result = execute_command_normal(frame, db, tx.clone()).await?;
+                    let result = execute_command_normal(frame, db, tx.clone(),command_context).await?;
                     vec_result.push(result.serialize());
                     vec = &vec[size..];
                     total_size += size;

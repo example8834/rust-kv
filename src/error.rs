@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use std::io;
+use std::{io, sync::Arc};
 use thiserror::Error;
 
 
@@ -35,7 +35,7 @@ pub enum Command {
 // 每一个 struct 现在都是一个独立的、清晰的命令“实体”
 #[derive(Debug, Clone)]
 pub struct SetCommand {
-    pub key: String,
+    pub key: Arc<String>,
     pub value: Bytes,
     pub expiration: Option<Expiration>, 
     pub condition: Option<SetCondition>
@@ -43,7 +43,7 @@ pub struct SetCommand {
 
 #[derive(Debug, Clone)]
 pub struct GetCommand {
-    pub key: String,
+    pub key: Arc<String>,
 }
 
 #[derive(Debug, Clone)]

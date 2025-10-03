@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use tracing_subscriber::util;
 
 use crate::{
     aof_exchange::CommandAofExchange, command_execute::{
@@ -8,7 +9,7 @@ use crate::{
 
 impl CommandExecutor for SetCommand {
     // 必须在这里也加上 <'ctx> 和对应的生命周期标注
-    async fn execute<'ctx>(self, ctx: &'ctx CommandContext<'ctx>) -> Result<Frame, KvError> {
+    async fn execute<'ctx>(self, ctx: &'ctx mut CommandContext<'ctx>) -> Result<Frame, KvError> {
         
         let time_expire_u64: Option<u64>;
         let time_expire = if let Some(expire) = &self.expiration {
@@ -35,9 +36,9 @@ impl CommandExecutor for SetCommand {
             }
         };
         //获取之后立刻使用。减少锁持有时间
-        let mut db_lock = ctx.db.store.lock_write().await;
+        let mut db_lock = ctx.db.store.lock_write(ctx.connect_context).await;
         //这里的self
-        db_lock.set_string(self.key, value_obj, &ctx.db.manager);
+        db_lock.set_string(self.key, value_obj, &ctx.db.manager,ctx.connect_context);
         //序列化问题
         self.execute_aof(ctx).await?;
         Ok(Frame::Simple("OK".to_string()))
@@ -49,10 +50,10 @@ impl CommandExecutor for GetCommand {
     async fn execute<'ctx>(
         self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: &'ctx  CommandContext<'ctx>,
+        ctx: &'ctx mut CommandContext<'ctx>,
     ) -> Result<Frame, KvError> {
-        let db_lock = ctx.db.store.lock_read().await;
-        let value = db_lock.get_string(self.key, &ctx.db.manager);
+        let db_lock = ctx.db.store.lock_read(ctx.connect_context).await;
+        let value = db_lock.get_string(self.key, &ctx.db.manager,ctx.connect_context);
         match value {
             Some(entry) => {
                 let data = entry.data;

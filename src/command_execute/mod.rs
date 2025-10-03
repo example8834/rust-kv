@@ -11,7 +11,7 @@ use crate::{
     core_aof::AofMessage,
     core_time::get_cached_time_ms,
     db::Db,
-    error::{Frame, KvError}, types::Storage
+    error::{Frame, KvError}, types::{ConnectionState, Storage}
 };
  mod common;
  mod string;
@@ -19,6 +19,7 @@ use crate::{
 pub struct CommandContext<'a> {
     pub db: &'a Db,
     pub tx: &'a Option<Sender<AofMessage>>,
+    pub connect_context:&'a mut ConnectionState
 }
 
 pub trait CommandExecutor {
@@ -26,7 +27,7 @@ pub trait CommandExecutor {
     fn execute<'ctx>(
         self,
         // ✅ 核心改动：从 &mut CommandContext 变成了 &CommandContext
-        ctx: &'ctx CommandContext<'ctx>,
+        ctx: &'ctx mut  CommandContext<'ctx>,
     ) -> impl std::future::Future<Output = Result<Frame, KvError>> + Send ;
 
     // “原语”方法

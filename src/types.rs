@@ -29,11 +29,14 @@ pub struct ValueEntry {
     pub eviction_metadata: u64,      // 32位记录最近访问时间戳 后32 记录访问次数
 }
 // 我们的核心存储结构
-type DbStore = HashMap<String, ValueEntry>;
+type DbStore = HashMap<Arc<String>, ValueEntry>;
 
-// 把 Arc<Mutex<...>> 封装到一个新结构里，这是个好习惯
 // 这个数组
 #[derive(Clone, Default)]
 pub struct Storage {
-    pub(crate) store: Arc<RwLock<DbStore>>,
+    pub(crate) store: Vec<Arc<RwLock<DbStore>>>,
+}
+
+pub struct ConnectionState{
+    pub selected_db: usize,
 }

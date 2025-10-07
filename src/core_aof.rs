@@ -76,7 +76,7 @@ pub async fn explain_execute_aofcommand(
     let mut exec_time;
     let mut tail_file_length = 0;
     //这个默认恢复从0 开始 
-    let mut conn_state = ConnectionState { selected_db: 0 ,client_address: None};
+    //let mut conn_state = ConnectionState { selected_db: 0 ,client_address: None};
     loop {
         let size: usize = file.read(file_data_ref)? + tail_file_length;
         let mut tail_size: usize = 0;
@@ -97,7 +97,7 @@ pub async fn explain_execute_aofcommand(
                     Some((frame, size)) => {
                         match Command::try_from(frame) {
                             Ok(frame) => {
-                                execute_command(frame, db,&mut conn_state).await?;
+                                execute_command(frame, db).await?;
                                 data = &data[size..];
                                 exec_time += 1;
                             }

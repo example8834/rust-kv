@@ -36,9 +36,9 @@ impl CommandExecutor for SetCommand {
             }
         };
         //获取之后立刻使用。减少锁持有时间
-        let mut db_lock = ctx.db.store.lock_write(ctx.connect_context).await;
+        let mut db_lock = ctx.db.store.lock_write().await;
         //这里的self
-        db_lock.set_string(self.key, value_obj, &ctx.db.manager,ctx.connect_context);
+        db_lock.set_string(self.key, value_obj, &mut ctx.db.manager);
         //序列化问题
         self.execute_aof(ctx).await?;
         Ok(Frame::Simple("OK".to_string()))
@@ -52,8 +52,8 @@ impl CommandExecutor for GetCommand {
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
         ctx: &'ctx mut CommandContext<'ctx>,
     ) -> Result<Frame, KvError> {
-        let db_lock = ctx.db.store.lock_read(ctx.connect_context).await;
-        let value = db_lock.get_string(self.key, &ctx.db.manager,ctx.connect_context);
+        let mut db_lock = ctx.db.store.lock_read().await;
+        let value = db_lock.get_string(self.key,& mut ctx.db.manager);
         match value {
             Some(entry) => {
                 let data = entry.data;

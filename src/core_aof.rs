@@ -7,10 +7,11 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{self, Duration};
 
+use crate::context::ConnectionState;
 use crate::core_execute::{ execute_command};
 use crate::core_explain::parse_frame;
 use crate::error::{Command};
-use crate::types::{ConnectionState, Storage};
+use crate::types::{ Storage};
 use crate::Db;
 
 
@@ -65,7 +66,7 @@ pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str) {
 
 pub async fn explain_execute_aofcommand(
     path: &str,
-    db: &Db,
+    db: & mut Db,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut file = File::open(path)?;
     //单线程恢复可以很大
@@ -75,7 +76,7 @@ pub async fn explain_execute_aofcommand(
     let mut exec_time;
     let mut tail_file_length = 0;
     //这个默认恢复从0 开始 
-    let mut conn_state = ConnectionState { selected_db: 0 };
+    let mut conn_state = ConnectionState { selected_db: 0 ,client_address: None};
     loop {
         let size: usize = file.read(file_data_ref)? + tail_file_length;
         let mut tail_size: usize = 0;

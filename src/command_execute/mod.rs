@@ -8,18 +8,14 @@ use itoa::Buffer;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    core_aof::AofMessage,
-    core_time::get_cached_time_ms,
-    db::Db,
-    error::{Frame, KvError}, types::{ConnectionState, Storage}
+    context::ConnectionState, core_aof::AofMessage, core_time::get_cached_time_ms, db::Db, error::{Frame, KvError}, types::Storage
 };
  mod common;
  mod string;
 
 pub struct CommandContext<'a> {
-    pub db: &'a Db,
-    pub tx: &'a Option<Sender<AofMessage>>,
-    pub connect_context:&'a mut ConnectionState
+    pub db: &'a mut Db,
+    pub tx: &'a Option<&'a Sender<AofMessage>>,
 }
 
 pub trait CommandExecutor {

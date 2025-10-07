@@ -1,6 +1,7 @@
 mod aof_exchange;
 mod command_exchange;
 mod command_execute;
+mod context;
 mod core_aof;
 mod core_exchange;
 mod core_execute;
@@ -11,6 +12,7 @@ mod error;
 mod server;
 mod types;
 
+use crate::context::{ConnectionState, CONN_STATE};
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
 use crate::core_execute::execute_command_normal;
 use crate::core_explain::parse_frame;
@@ -41,8 +43,8 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     println!("服务器启动，监听于 127.0.0.1:6379");
 
     //创建db
-    let db = Db::new();
-    match explain_execute_aofcommand(aop_file_path, &db).await {
+    let mut db = Db::new();
+    match explain_execute_aofcommand(aop_file_path, &mut db).await {
         Err(e) => {
             panic!("aof 清理失败  {}", e)
         }
@@ -59,12 +61,21 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         tracing::info!("接收到新连接");
         let db = db.clone();
         let tx_clone = tx.clone();
-        // 3. 为每个连接生成一个新的异步任务
-        tokio::spawn(async move {
-            // 在这个新任务中处理连接
-            if let Err(e) = handle_connection(socket, db, tx_clone).await {
-                tracing::error!("处理时出错: {}", e);
-            }
-        });
+
+        // 模拟一个新的客户端连接进来
+        let client_addr = "192.168.1.10:54321".to_string();
+        let initial_state = ConnectionState {
+            selected_db: 1, // 默认连接到 1 号数据库
+            client_address: Some(client_addr),
+        };
+        CONN_STATE.scope(initial_state, async {
+            // 3. 为每个连接生成一个新的异步任务
+            tokio::task::spawn_local(async move {
+                // 在这个新任务中处理连接
+                if let Err(e) = handle_connection(socket, db, tx_clone).await {
+                    tracing::error!("处理时出错: {}", e);
+                }
+            });
+        }).await;
     }
 }

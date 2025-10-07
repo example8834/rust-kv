@@ -11,7 +11,7 @@ pub mod string;
 // 确保有这行
 use tokio::sync::RwLock;
 
-use crate::{error::KvError, types::{ ConnectionState, Storage, ValueEntry}};
+use crate::{context::{ConnectionState, CONN_STATE}, error::KvError, types::{ Storage, ValueEntry}};
 
 
 // 1. 让 Value 枚举本身可以 Clone
@@ -44,17 +44,19 @@ impl Storage {
 
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
-    pub async fn lock_write(&self,connect_state:& mut ConnectionState) -> LockedDb<'_> {
+    pub async fn lock_write(&self) -> LockedDb<'_> {
+        let select_db = CONN_STATE.with(|state| state.selected_db);
         //这里是创建 出来的这个db
         LockedDb {
-            guard: LockType::Write(self.store.get(connect_state.selected_db).unwrap().write().await),
+            guard: LockType::Write(self.store.get(select_db).unwrap().write().await),
         }
     }
 
-    pub async fn lock_read(&self,connect_state:& mut ConnectionState) -> LockedDb<'_> {
+    pub async fn lock_read(&self) -> LockedDb<'_> {
+        let select_db = CONN_STATE.with(|state| state.selected_db);
         //这里是创建 出来的这个db
         LockedDb {
-            guard: LockType::Read(self.store.get(connect_state.selected_db).unwrap().read().await),
+            guard: LockType::Read(self.store.get(select_db).unwrap().read().await),
         }
     }
 

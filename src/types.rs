@@ -36,7 +36,3 @@ type DbStore = HashMap<Arc<String>, ValueEntry>;
 pub struct Storage {
     pub(crate) store: Vec<Arc<RwLock<DbStore>>>,
 }
-
-pub struct ConnectionState{
-    pub selected_db: usize,
-}

@@ -87,6 +87,7 @@ dependencies = [
  "itoa",
  "lexical-core",
  "memchr",
+ "once_cell",
  "serde",
  "serde_json",
  "thiserror",

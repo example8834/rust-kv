@@ -11,6 +11,7 @@ mod db;
 mod error;
 mod server;
 mod types;
+mod config;
 
 use crate::context::{CONN_STATE, ConnectionState};
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};

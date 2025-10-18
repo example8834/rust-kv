@@ -52,7 +52,7 @@ impl CommandExecutor for GetCommand {
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
         ctx: &'ctx mut CommandContext<'ctx>,
     ) -> Result<Frame, KvError> {
-        let mut db_lock = ctx.db.store.lock_read().await;
+        let  db_lock = ctx.db.store.lock_read().await;
         let value = db_lock.get_string(self.key,& mut ctx.db.manager);
         match value {
             Some(entry) => {

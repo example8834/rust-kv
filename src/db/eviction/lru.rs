@@ -1,0 +1,12 @@
+pub mod lru_cache;
+pub mod lru_linklist;
+pub struct LruCache;
+
+
+pub struct LruEntry {
+    pub hash_vec :Vec<LruShare>,
+}
+
+pub struct LruShare{
+   
+}

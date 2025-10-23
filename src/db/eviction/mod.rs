@@ -4,15 +4,16 @@ use std::{
 };
 
 use tokio::sync::RwLock;
+use tracing_subscriber::fmt::writer;
 
 use crate::{
-    config::{CONFIG, EvictionType},
-    db::{LockType, LockedDb},
+    config::{EvictionType, CONFIG},
+    db::{ eviction::lru::LruCache, LockType, LockedDb},
     types::ValueEntry,
 };
 
-mod lfu_cache;
-mod lru_cache;
+mod lfu;
+mod lru;
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct TtlEntry {
@@ -48,7 +49,7 @@ impl EvictionManager {
         let mut binary_heap = self.ttl_heap.blocking_write();
         match CONFIG.eviction_type {
             EvictionType::LRU => {
-                lru_cache::LruCache::write_op(&mut binary_heap, key, value);
+                LruCache::write_op(&mut binary_heap, key, value);
             }
             EvictionType::LFU => {}
         }
@@ -59,7 +60,7 @@ impl EvictionManager {
         let mut binary_heap = self.ttl_heap.blocking_write();
         match CONFIG.eviction_type {
             EvictionType::LRU => {
-                lru_cache::LruCache::read_op(&mut binary_heap, key);
+                LruCache::read_op(&mut binary_heap, key);
             }
             EvictionType::LFU => {}
         }
@@ -69,7 +70,7 @@ impl EvictionManager {
         let mut binary_heap = self.ttl_heap.blocking_write();
         match CONFIG.eviction_type {
             EvictionType::LRU => {
-                lru_cache::LruCache::delete_op(&mut binary_heap, key);
+                LruCache::delete_op(&mut binary_heap, key);
             }
             EvictionType::LFU => {}
         }   

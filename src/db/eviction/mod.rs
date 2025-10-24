@@ -1,14 +1,12 @@
 use std::{
-    collections::{BinaryHeap, HashMap, binary_heap},
-    sync::Arc,
+    clone, collections::{binary_heap, BinaryHeap, HashMap}, sync::Arc
 };
 
 use tokio::sync::RwLock;
-use tracing_subscriber::fmt::writer;
 
 use crate::{
     config::{EvictionType, CONFIG},
-    db::{ eviction::lru::LruCache, LockType, LockedDb},
+    db::{ eviction::lru::{lru_struct::LruMemoryCache, LruCache}, LockType, LockedDb},
     types::ValueEntry,
 };
 
@@ -21,9 +19,10 @@ pub struct TtlEntry {
     key: Arc<String>,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug,Clone)]
 pub struct EvictionManager {
     pub ttl_heap: Arc<RwLock<BinaryHeap<TtlEntry>>>,
+    pub memory_eviction: LruMemoryCache,
 }
 
 impl EvictionManager {
@@ -36,9 +35,9 @@ impl EvictionManager {
 }
 
 trait EvictionWriteOp {
-    fn write_op(binary_heap: &mut BinaryHeap<TtlEntry>, key: Arc<String>, value: &ValueEntry);
-    fn read_op(binary_heap: &mut BinaryHeap<TtlEntry>, key: Arc<String>);
-    fn delete_op(binary_heap: &mut BinaryHeap<TtlEntry>, key: &str);
+    fn write_op(binary_heap: &mut BinaryHeap<TtlEntry>,memory_cache: &mut LruMemoryCache, key: Arc<String>, value: &ValueEntry);
+    fn read_op(binary_heap: &mut BinaryHeap<TtlEntry>,memory_cache: &mut LruMemoryCache, key: Arc<String>);
+    fn delete_op(binary_heap: &mut BinaryHeap<TtlEntry>,memory_cache: &mut LruMemoryCache, key: Arc<String>);
 }
 
 // 假设 LockedDb 包含 db 的引用和 guard
@@ -49,28 +48,28 @@ impl EvictionManager {
         let mut binary_heap = self.ttl_heap.blocking_write();
         match CONFIG.eviction_type {
             EvictionType::LRU => {
-                LruCache::write_op(&mut binary_heap, key, value);
+                LruCache::write_op(&mut binary_heap,& mut self.memory_eviction, key, value);
             }
             EvictionType::LFU => {}
         }
     }
 
     // 一个通用的、处理【写操作】的模板方法
-    pub fn execute_read_op(&self, key: Arc<String>) {
+    pub fn execute_read_op(&mut self, key: Arc<String>) {
         let mut binary_heap = self.ttl_heap.blocking_write();
         match CONFIG.eviction_type {
             EvictionType::LRU => {
-                LruCache::read_op(&mut binary_heap, key);
+                LruCache::read_op(&mut binary_heap,& mut self.memory_eviction, key);
             }
             EvictionType::LFU => {}
         }
     }
 
-    pub fn execute_delete(&mut self, key: &str) {
+    pub fn execute_delete(&mut self, key: Arc<String>) {
         let mut binary_heap = self.ttl_heap.blocking_write();
         match CONFIG.eviction_type {
             EvictionType::LRU => {
-                LruCache::delete_op(&mut binary_heap, key);
+                LruCache::delete_op(&mut binary_heap,& mut self.memory_eviction, key);
             }
             EvictionType::LFU => {}
         }   

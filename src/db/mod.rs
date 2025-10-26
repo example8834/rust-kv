@@ -15,7 +15,7 @@ mod generic;
 // 确保有这行
 use tokio::sync::RwLock;
 
-use crate::{context::{ConnectionState, CONN_STATE}, error::KvError, types::{ Storage, ValueEntry}};
+use crate::{context::{ConnectionState, CONN_STATE}, db::eviction::lru::lru_struct::{LruMemoryCache, LruNode}, error::KvError, types::ValueEntry};
 
 pub(crate) use eviction::EvictionManager;
 
@@ -23,13 +23,11 @@ pub(crate) use eviction::EvictionManager;
 #[derive(Clone)] 
 pub struct Db {
     pub store: Storage,
-    pub manager: EvictionManager,
 }
 impl Db {
     pub fn new() -> Self {
         Self {
             store: Storage::new(),
-            manager: EvictionManager::new(),
         }
     }
 }
@@ -43,9 +41,18 @@ pub struct LockedDb<'a> {
     pub guard: LockType<'a>,
 }
 
+//这个的粒度就是基本的粒度
 pub enum LockType<'a> {
-    Write(tokio::sync::RwLockWriteGuard<'a, HashMap<Arc<String>, ValueEntry>>),
-    Read(tokio::sync::RwLockReadGuard<'a, HashMap<Arc<String>, ValueEntry>>),
+    Write(tokio::sync::RwLockWriteGuard<'a, LruNode>),
+    Read(tokio::sync::RwLockReadGuard<'a, LruNode>),
+}
+
+
+
+// 这个数组
+#[derive(Clone, Default)]
+pub struct Storage {
+    pub(crate) store: Vec<Arc<LruMemoryCache>>,
 }
 
 
@@ -63,19 +70,18 @@ impl Storage {
 
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
-    pub async fn lock_write(&self) -> LockedDb<'_> {
+    pub async fn lock_write(& mut self,key: &Arc<String>) -> LockedDb{
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        //这里是创建 出来的这个db
-        LockedDb {
-            guard: LockType::Write(self.store.get(select_db).unwrap().write().await),
+        LockedDb{
+            guard: LockType::Write(self.store.get(select_db).unwrap().get_lock_write(key))
         }
     }
 
-    pub async fn lock_read(&self) -> LockedDb<'_> {
+    // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
+    pub async fn lock_read(&mut self,key: &Arc<String>) -> LockedDb{
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        //这里是创建 出来的这个db
-        LockedDb {
-            guard: LockType::Read(self.store.get(select_db).unwrap().read().await),
+        LockedDb{
+            guard: LockType::Read(self.store.get(select_db).unwrap().get_lock_read(key))
         }
     }
 

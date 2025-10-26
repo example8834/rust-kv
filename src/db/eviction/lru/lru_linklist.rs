@@ -101,7 +101,8 @@ impl LruList {
     }
 
 
-    fn pop_front(&mut self) -> Option<Arc<String>> {
+    //删除头节点 并返回头节点的key
+    pub fn pop_front(&mut self) -> Option<Arc<String>> {
         // 1. 使用 .take() 来“取出” head，这会自动把 self.head 设为 None
         //    这比 if let 更安全，因为它处理了所有权
         let head_ptr = self.head.take()?; // 如果是 None，直接 ? 退出返回 None
@@ -138,7 +139,7 @@ impl LruList {
         Some(head_box.key)
     }
 
-    //删除时删除节点
+    //删除指定节点
     pub fn pop_node(&mut self, node_ptr: NonNull<Node>) {
         self.len -= 1;
         unsafe {

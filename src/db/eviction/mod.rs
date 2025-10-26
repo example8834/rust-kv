@@ -10,8 +10,8 @@ use crate::{
     types::ValueEntry,
 };
 
-mod lfu;
-mod lru;
+pub mod lfu;
+pub mod lru;
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct TtlEntry {
@@ -21,7 +21,6 @@ pub struct TtlEntry {
 
 #[derive(Default, Debug,Clone)]
 pub struct EvictionManager {
-    pub ttl_heap: Arc<RwLock<BinaryHeap<TtlEntry>>>,
     pub memory_eviction: LruMemoryCache,
 }
 
@@ -35,43 +34,11 @@ impl EvictionManager {
 }
 
 trait EvictionWriteOp {
-    fn write_op(binary_heap: &mut BinaryHeap<TtlEntry>,memory_cache: &mut LruMemoryCache, key: Arc<String>, value: &ValueEntry);
-    fn read_op(binary_heap: &mut BinaryHeap<TtlEntry>,memory_cache: &mut LruMemoryCache, key: Arc<String>);
-    fn delete_op(binary_heap: &mut BinaryHeap<TtlEntry>,memory_cache: &mut LruMemoryCache, key: Arc<String>);
+    fn write_op(memory_cache: &mut LruMemoryCache, key: Arc<String>, value: &ValueEntry);
+    fn read_op(memory_cache: &mut LruMemoryCache, key: Arc<String>);
+    fn delete_op(memory_cache: &mut LruMemoryCache, key: Arc<String>);
 }
 
 // 假设 LockedDb 包含 db 的引用和 guard
 // 这里根据上下文来获取 具体那个淘汰类型
-impl EvictionManager {
-    // 一个通用的、处理【写操作】的模板方法
-    pub fn execute_write_op(&mut self, key: Arc<String>, value: &ValueEntry) {
-        let mut binary_heap = self.ttl_heap.blocking_write();
-        match CONFIG.eviction_type {
-            EvictionType::LRU => {
-                LruCache::write_op(&mut binary_heap,& mut self.memory_eviction, key, value);
-            }
-            EvictionType::LFU => {}
-        }
-    }
 
-    // 一个通用的、处理【写操作】的模板方法
-    pub fn execute_read_op(&mut self, key: Arc<String>) {
-        let mut binary_heap = self.ttl_heap.blocking_write();
-        match CONFIG.eviction_type {
-            EvictionType::LRU => {
-                LruCache::read_op(&mut binary_heap,& mut self.memory_eviction, key);
-            }
-            EvictionType::LFU => {}
-        }
-    }
-
-    pub fn execute_delete(&mut self, key: Arc<String>) {
-        let mut binary_heap = self.ttl_heap.blocking_write();
-        match CONFIG.eviction_type {
-            EvictionType::LRU => {
-                LruCache::delete_op(&mut binary_heap,& mut self.memory_eviction, key);
-            }
-            EvictionType::LFU => {}
-        }   
-    }
-}

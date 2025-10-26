@@ -11,20 +11,17 @@ impl<'a> LockedDb<'a> {
         mut self,
         key: Arc<String>,
         value: ValueEntry,
-        manager: &mut EvictionManager,
     ) {
-        manager.execute_write_op(key.clone(), &value);
         if let LockType::Write(ref mut map) = self.guard {
-            map.insert(key, value);
+            map.db_store.insert(key, value);
         } else {
             panic!("Attempted to write with a read lock");
         };
     }
 
-    pub fn get_string(self, key: Arc<String>, manager: &mut EvictionManager) -> Option<ValueEntry> {
-        manager.execute_read_op(key.clone());
+    pub fn get_string(self, key: Arc<String>) -> Option<ValueEntry> {
         if let LockType::Read(ref map) = self.guard {
-            if let Some(entry) = map.get(&key) {
+            if let Some(entry) = map.db_store.get(&key) {
                 let time_expires = entry.expires_at;
                 if let Some(expire_time) = time_expires {
                     if get_cached_time_ms() > expire_time {

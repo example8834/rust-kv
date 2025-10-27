@@ -14,8 +14,8 @@ impl CommandAofExchange for SetCommand {
             return Ok(Frame::Simple("OK".to_string()));
         }
         let mut frame_vec = vec![crate::error::Frame::Bulk(Bytes::from("SET".to_string()))];
-        frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.key.clone().to_string())));
-        frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.value.clone())));
+        frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.key.to_string())));
+        frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.value)));
         if let Some(expire) = self.expiration {
             match expire {
                 crate::error::Expiration::EX(s) => {

@@ -6,21 +6,26 @@ use std::{
     sync::{Arc, OnceLock},
     time::Instant,
 };
-mod string;
 mod eviction;
-mod list;
-mod hash;
 mod generic;
+mod hash;
+mod list;
+mod string;
 
 // 确保有这行
 use tokio::sync::RwLock;
 
-use crate::{context::{ConnectionState, CONN_STATE}, db::eviction::lru::lru_struct::{LruMemoryCache, LruNode}, error::KvError, types::ValueEntry};
+use crate::{
+    context::{CONN_STATE, ConnectionState},
+    db::eviction::lru::lru_struct::{LruMemoryCache, LruNode},
+    error::KvError,
+    types::ValueEntry,
+};
 
 pub(crate) use eviction::EvictionManager;
 
 // 3. 定义并公开那个唯一的、组合好的顶层结构
-#[derive(Clone)] 
+#[derive(Clone)]
 pub struct Db {
     pub store: Storage,
 }
@@ -47,15 +52,11 @@ pub enum LockType<'a> {
     Read(tokio::sync::RwLockReadGuard<'a, LruNode>),
 }
 
-
-
 // 这个数组
 #[derive(Clone, Default)]
 pub struct Storage {
     pub(crate) store: Vec<Arc<LruMemoryCache>>,
 }
-
-
 
 //其实理论上操作需要绑定数据 并且内聚的情况下。理论上操作db 就应该核心的方法收拾有db提供 外部不应该耦合到db内部
 //db内部就应该提供方法 如果外部执行指令 都需要调用db 也不错 就是如果无法接偶 db提供方法尽量底层 让外部拼接
@@ -63,28 +64,35 @@ pub struct Storage {
 impl Storage {
     // 提供一个公共的构造函数
     pub fn new() -> Self {
-        // ... 你的初始化逻辑，比如启动后台任务 ...
-        Self::default()
+        // 1. 先拿到一个“空”的 self (store 是个空 Vec)
+        let mut this = Self::default();
+
+        // 2. 【你的自定义逻辑】
+        // 比如，像 Redis 一样，默认创建 16 个数据库
+        for _ in 0..16 {
+            // 假设 LruMemoryCache 也有一个 new()
+            this.store.push(Arc::new(LruMemoryCache::new()));
+        }
+
+        // 4. 返回“初始化好”的 self
+        this
     }
 
-
-
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
-    pub async fn lock_write(& mut self,key: &Arc<String>) -> LockedDb{
+    pub async fn lock_write(&self, key: &Arc<String>) -> LockedDb<'_> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb{
-            guard: LockType::Write(self.store.get(select_db).unwrap().get_lock_write(key))
+        LockedDb {
+            guard: LockType::Write(self.store.get(select_db).unwrap().get_lock_write(key).await),
         }
     }
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
-    pub async fn lock_read(&mut self,key: &Arc<String>) -> LockedDb{
+    pub async fn lock_read(&self, key: &Arc<String>) -> LockedDb<'_> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb{
-            guard: LockType::Read(self.store.get(select_db).unwrap().get_lock_read(key))
+        LockedDb {
+            guard: LockType::Read(self.store.get(select_db).unwrap().get_lock_read(key).await),
         }
     }
-
 }
 
 // 一个直接从 Bytes 高效解析 i64 的函数

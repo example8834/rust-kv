@@ -4,7 +4,10 @@ use fxhash::FxHasher;
 use std::hash::{Hash, Hasher};
 use tokio::sync::RwLock;
 
-use crate::{db::{eviction::lru::lru_linklist::{LruList, Node}}, types::ValueEntry};
+use crate::{
+    db::eviction::lru::lru_linklist::{LruList, Node},
+    types::ValueEntry,
+};
 const NUM_SHARDS: usize = 32; // 32 个分片
 
 #[derive(Debug, Clone)]
@@ -59,9 +62,9 @@ impl LruMemoryCache {
     }
 
     //通过 专门的hash算法 获取在那个分片
-    pub fn put(&self, key: Arc<String>) -> tokio::sync::RwLockWriteGuard<'_, LruNode>  {
+    pub async fn put(&self, key: Arc<String>) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
         let shard_index = LruMemoryCache::get_shard_index(&key);
-        let mut shard = self.message[shard_index].blocking_write();
+        let mut shard = self.message[shard_index].write().await;
         //接下来就是在这个分片上操作
         let contaion = shard.map_key.contains_key(&key);
         if !contaion {
@@ -85,9 +88,9 @@ impl LruMemoryCache {
         shard
     }
 
-    pub fn pop(&mut self, key: Arc<String>) {
+    pub async fn pop(&self, key: Arc<String>) {
         let shard_index = LruMemoryCache::get_shard_index(&key);
-        let mut shard = self.message[shard_index].blocking_write();
+        let mut shard = self.message[shard_index].write().await;
 
         // 1. 从 master_map 删除，拿到元数据
         if let Some(node_ptr) = shard.map_key.remove(&key) {
@@ -102,8 +105,7 @@ impl LruMemoryCache {
             //    我们必须 .cloned() 来把 Option<&Arc<String>> 转换成 Option<Arc<String>>
             //    这会克隆 Arc (引用计数+1)，得到一个【新的、拥有的】Arc
             //    get() 产生的对 shard 的【不可变借用】在这一行【立即结束】
-            let moved_key_cloned =
-                shard.sample_keys.get(idx_to_remove).cloned();
+            let moved_key_cloned = shard.sample_keys.get(idx_to_remove).cloned();
 
             // 5. 现在 `moved_key_cloned` 是一个拥有的值，它不借用 shard
             if let Some(key) = moved_key_cloned {
@@ -115,30 +117,23 @@ impl LruMemoryCache {
         }
     }
 
-    pub fn read(&self, key: Arc<String>) {
+    pub async fn read(&self, key: Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
         let shard_index = LruMemoryCache::get_shard_index(&key);
-        let mut shard = self.message[shard_index].blocking_write();
+        let mut shard = self.message[shard_index].write().await;
         // 必须用 if let 或 match 来安全地处理
         if let Some(meta_ptr) = shard.map_key.get(&key) {
             //接下来就是在这个分片上操作
             let node_ptr = meta_ptr.lru_node;
             shard.list.push_mid_back(node_ptr);
         }
+        shard.downgrade()
     }
 
-    pub fn get_lock_write(
-        &self,
-        key: &Arc<String>,
-    ) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
-        self.put(key.clone())
+    pub async fn get_lock_write(&self, key: &Arc<String>) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
+        self.put(key.clone()).await
     }
 
-    pub fn get_lock_read(
-        &self,
-        key: &Arc<String>,
-    ) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
-        self.read(key.clone());
-        let shard_index = LruMemoryCache::get_shard_index(key);
-        self.message[shard_index].blocking_read()
+    pub async fn get_lock_read(&self, key: &Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
+        self.read(key.clone()).await
     }
 }

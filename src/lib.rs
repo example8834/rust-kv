@@ -1,6 +1,7 @@
 mod aof_exchange;
 mod command_exchange;
 mod command_execute;
+mod config;
 mod context;
 mod core_aof;
 mod core_exchange;
@@ -11,7 +12,6 @@ mod db;
 mod error;
 mod server;
 mod types;
-mod config;
 
 use crate::context::{CONN_STATE, ConnectionState};
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
@@ -79,16 +79,30 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
             selected_db: 0, // 默认连接到 1 号数据库
             client_address: Some(client_addr),
         };
-        CONN_STATE
-            .scope(initial_state, async {
-                // 3. 为每个连接生成一个新的异步任务
-                tokio::task::spawn_local(async move {
-                    // 在这个新任务中处理连接
+        // CONN_STATE
+        //     .scope(initial_state, async {
+        //         // 3. 为每个连接生成一个新的异步任务
+        //         tokio::task::spawn(async move {
+        //             // 在这个新任务中处理连接
+        //             if let Err(e) = handle_connection(socket, db, tx_clone).await {
+        //                 tracing::error!("处理时出错: {}", e);
+        //             }
+        //         });
+        //     })
+        //     .await;
+        // 2. 【正确！】spawn 一个新任务
+        tokio::task::spawn(async move {
+            // 3. 【正确！】在新任务【内部】设置 TaskLocal
+            CONN_STATE
+                .scope(initial_state, async move {
+                    // 现在，这个 handle_connection 任务
+                    // 以及它调用的所有函数 (比如 lock_read)
+                    // 都可以安全地调用 CONN_STATE.with() 了！
                     if let Err(e) = handle_connection(socket, db, tx_clone).await {
                         tracing::error!("处理时出错: {}", e);
                     }
-                });
-            })
-            .await;
+                })
+                .await; // .await 这个 scope
+        });
     }
 }

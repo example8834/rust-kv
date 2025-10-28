@@ -3,7 +3,7 @@ use itoa::Buffer;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     pin::Pin,
-    sync::{Arc, OnceLock},
+    sync::{atomic::AtomicUsize, Arc, OnceLock},
     time::Instant,
 };
 mod eviction;
@@ -67,8 +67,7 @@ impl Storage {
         // 1. 先拿到一个“空”的 self (store 是个空 Vec)
         let mut this = Self::default();
 
-        // 2. 【你的自定义逻辑】
-        // 比如，像 Redis 一样，默认创建 16 个数据库
+        //默认创建 16 个数据库
         for _ in 0..16 {
             // 假设 LruMemoryCache 也有一个 new()
             this.store.push(Arc::new(LruMemoryCache::new()));
@@ -91,6 +90,13 @@ impl Storage {
         let select_db = CONN_STATE.with(|state| state.selected_db);
         LockedDb {
             guard: LockType::Read(self.store.get(select_db).unwrap().get_lock_read(key).await),
+        }
+    }
+
+    pub async fn lock_delete(&self, key: &Arc<String>) -> LockedDb<'_> {
+        let select_db = CONN_STATE.with(|state| state.selected_db);
+        LockedDb {
+            guard: LockType::Write(self.store.get(select_db).unwrap().get_lock_delete(key).await),
         }
     }
 }

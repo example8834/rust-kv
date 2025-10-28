@@ -21,14 +21,17 @@ impl CommandExecutor for SetCommand {
         } else {
             None
         };
+        //再这里创建value
         let value_obj = match bytes_to_i64_fast(&self.value) {
             Some(i) => ValueEntry {
                 data: Value::Simple(Element::Int(i)),
                 expires_at: time_expire,
+                data_size: std::mem::size_of_val(&i),
             },
             None => ValueEntry {
                 data: Value::Simple(Element::String(self.value.clone())),
                 expires_at: time_expire,
+                data_size: self.value.len(),
             },
         };
         //获取之后立刻使用。减少锁持有时间

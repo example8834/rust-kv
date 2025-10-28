@@ -1,21 +1,22 @@
-use std::{collections::HashMap, ptr::NonNull, sync::Arc};
+use std::{collections::HashMap, ptr::NonNull, sync::{atomic::AtomicUsize, Arc}};
 
 use fxhash::FxHasher;
 use std::hash::{Hash, Hasher};
 use tokio::sync::RwLock;
 
 use crate::{
-    db::eviction::lru::lru_linklist::{LruList, Node},
-    types::ValueEntry,
+    config::GLOBAL_MEMORY, db::eviction::lru::lru_linklist::{LruList, Node}, types::ValueEntry
 };
-const NUM_SHARDS: usize = 32; // 32 个分片
+pub const NUM_SHARDS: usize = 32; // 32 个分片
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LruNode {
     pub map_key: HashMap<Arc<String>, MetaPointers>,
     pub list: LruList,
     pub sample_keys: Vec<Arc<String>>, // O(1) 采样数组
     pub db_store: HashMap<Arc<String>, ValueEntry>,
+    pub approx_memory: AtomicUsize, // 它自己分片的账 记录具体的内存大小
+    pub global_memory: Arc<AtomicUsize>, // 它也持有 Arc 指针
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,8 @@ impl LruMemoryCache {
                 list: LruList::new(),
                 sample_keys: Vec::new(),
                 db_store: HashMap::new(),
+                approx_memory: AtomicUsize::new(0).into(),
+                global_memory: Arc::clone(&GLOBAL_MEMORY)
             })));
         }
         Self { message }
@@ -88,7 +91,7 @@ impl LruMemoryCache {
         shard
     }
 
-    pub async fn pop(&self, key: Arc<String>) {
+    pub async fn pop(&self, key: Arc<String>)  -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
         let shard_index = LruMemoryCache::get_shard_index(&key);
         let mut shard = self.message[shard_index].write().await;
 
@@ -101,10 +104,7 @@ impl LruMemoryCache {
             let idx_to_remove = node_ptr.sample_idx;
             shard.sample_keys.swap_remove(idx_to_remove);
 
-            // 4. 【关键修复】
-            //    我们必须 .cloned() 来把 Option<&Arc<String>> 转换成 Option<Arc<String>>
-            //    这会克隆 Arc (引用计数+1)，得到一个【新的、拥有的】Arc
-            //    get() 产生的对 shard 的【不可变借用】在这一行【立即结束】
+
             let moved_key_cloned = shard.sample_keys.get(idx_to_remove).cloned();
 
             // 5. 现在 `moved_key_cloned` 是一个拥有的值，它不借用 shard
@@ -115,6 +115,7 @@ impl LruMemoryCache {
                 }
             }
         }
+        shard
     }
 
     pub async fn read(&self, key: Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
@@ -135,5 +136,9 @@ impl LruMemoryCache {
 
     pub async fn get_lock_read(&self, key: &Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
         self.read(key.clone()).await
+    }
+
+    pub async fn get_lock_delete(&self, key: &Arc<String>) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
+        self.pop(key.clone()).await
     }
 }

@@ -25,5 +25,7 @@ pub enum Value {
 #[derive(Clone, Debug)]
 pub struct ValueEntry {
     pub data: Value,
-    pub expires_at: Option<u64>, // u64 用来存过期时间点的时间戳   // 32位记录最近访问时间戳 后32 记录访问次数
+    pub expires_at: Option<u64>, // u64 用来存过期时间点的时间戳
+    // 关键！这个 Entry 内部的数据(不含key)总共占了多少内存
+    pub data_size: usize,
 }

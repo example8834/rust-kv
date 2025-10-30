@@ -52,10 +52,10 @@ pub enum LockType<'a> {
     Read(tokio::sync::RwLockReadGuard<'a, LruNode>),
 }
 
-// 这个数组
+// 这个数组 最外层的arc 是为了共享
 #[derive(Clone, Default)]
 pub struct Storage {
-    pub(crate) store: Vec<Arc<LruMemoryCache>>,
+    pub(crate) store: Arc<Vec<Arc<LruMemoryCache>>>,
 }
 
 //其实理论上操作需要绑定数据 并且内聚的情况下。理论上操作db 就应该核心的方法收拾有db提供 外部不应该耦合到db内部
@@ -65,16 +65,18 @@ impl Storage {
     // 提供一个公共的构造函数
     pub fn new() -> Self {
         // 1. 先拿到一个“空”的 self (store 是个空 Vec)
-        let mut this = Self::default();
+       let mut local_vec: Vec<Arc<LruMemoryCache>> = Vec::with_capacity(16);
 
         //默认创建 16 个数据库
         for _ in 0..16 {
             // 假设 LruMemoryCache 也有一个 new()
-            this.store.push(Arc::new(LruMemoryCache::new()));
+            local_vec.push(Arc::new(LruMemoryCache::new()));
         }
 
         // 4. 返回“初始化好”的 self
-        this
+        Storage{
+            store:Arc::new(local_vec)
+        }
     }
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard

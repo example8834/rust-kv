@@ -24,6 +24,7 @@ impl<'a> LockedDb<'a> {
             map.approx_memory.fetch_add(size_differ, std::sync::atomic::Ordering::SeqCst);
             //同时传递全局修改
             map.global_memory.fetch_add(size_differ, std::sync::atomic::Ordering::SeqCst);
+            //插入数值的时候 消耗掉这个
             db_store.insert(key, value);
         } else {
             panic!("Attempted to write with a read lock");

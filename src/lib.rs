@@ -65,6 +65,15 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .await;
     //开始时间获取任务
     start_time_caching_task();
+    /*
+     * db克隆代价很小
+     * 同时开启两个异步任务 
+     * 1.过期时间检测淘汰
+     * 2.内存监听淘汰
+     * 都是定时任务执行到主线程结束
+     */
+    db.clone().store.eviction_ttl();
+    db.clone().store.eviction_memory(1024*1024*8);
     // 2. 接受连接循环
     loop {
         // 等待一个新的客户端连接
@@ -72,7 +81,6 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         tracing::info!("接收到新连接");
         let db = db.clone();
         let tx_clone = tx.clone();
-
         // 模拟一个新的客户端连接进来
         let client_addr = "192.168.1.10:54321".to_string();
         let initial_state = ConnectionState {

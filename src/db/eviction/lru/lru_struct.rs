@@ -1,11 +1,17 @@
-use std::{collections::HashMap, ptr::NonNull, sync::{atomic::AtomicUsize, Arc}};
+use std::{
+    collections::HashMap,
+    ptr::NonNull,
+    sync::{Arc, atomic::AtomicUsize},
+};
 
 use fxhash::FxHasher;
 use std::hash::{Hash, Hasher};
 use tokio::sync::RwLock;
 
 use crate::{
-    config::GLOBAL_MEMORY, db::eviction::lru::lru_linklist::{LruList, Node}, types::ValueEntry
+    config::GLOBAL_MEMORY,
+    db::eviction::lru::lru_linklist::{LruList, Node},
+    types::ValueEntry,
 };
 pub const NUM_SHARDS: usize = 32; // 32 个分片
 
@@ -21,9 +27,9 @@ pub struct LruNode {
 
 #[derive(Debug, Clone)]
 // 你的新 Value 结构
-struct MetaPointers {
-    lru_node: NonNull<Node>, // 指向 LRU 链表节点
-    sample_idx: usize,       // 指向 Vec<Key> 的索引
+pub struct MetaPointers {
+    pub lru_node: NonNull<Node>, // 指向 LRU 链表节点
+    pub sample_idx: usize,       // 指向 Vec<Key> 的索引
 }
 
 #[derive(Default, Debug, Clone)]
@@ -36,7 +42,7 @@ unsafe impl Sync for LruNode {}
 
 impl LruMemoryCache {
     //自定义新算法 来确定key 应该落在哪个分片
-    fn get_shard_index<K: Hash>(key: &K) -> usize {
+    pub fn get_shard_index<K: Hash>(key: &K) -> usize {
         // 1. 创建 FxHasher
         let mut hasher = FxHasher::default(); // 变化在这里！
 
@@ -58,7 +64,7 @@ impl LruMemoryCache {
                 sample_keys: Vec::new(),
                 db_store: HashMap::new(),
                 approx_memory: AtomicUsize::new(0).into(),
-                global_memory: Arc::clone(&GLOBAL_MEMORY)
+                global_memory: Arc::clone(&GLOBAL_MEMORY),
             })));
         }
         Self { message }
@@ -91,10 +97,15 @@ impl LruMemoryCache {
         shard
     }
 
-    pub async fn pop(&self, key: Arc<String>)  -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
-        let shard_index = LruMemoryCache::get_shard_index(&key);
-        let mut shard = self.message[shard_index].write().await;
-
+    /**
+     * 由于没有把锁加入到内部 就是类似unsafe 一样
+     * 需要自己控制锁 防止重入 
+     * 外部的具体方法都加入到锁上 就可以不用二次调用锁了
+     */
+    pub async fn pop<'a>(
+        mut shard: tokio::sync::RwLockWriteGuard<'a, LruNode>,
+        key: Arc<String>,
+    ) -> tokio::sync::RwLockWriteGuard<'a, LruNode> {
         // 1. 从 master_map 删除，拿到元数据
         if let Some(node_ptr) = shard.map_key.remove(&key) {
             // 2. 从 LRU 链表删除
@@ -103,7 +114,6 @@ impl LruMemoryCache {
             // 3. 从 Vec 中删除 (O(1))
             let idx_to_remove = node_ptr.sample_idx;
             shard.sample_keys.swap_remove(idx_to_remove);
-
 
             let moved_key_cloned = shard.sample_keys.get(idx_to_remove).cloned();
 
@@ -118,6 +128,7 @@ impl LruMemoryCache {
         shard
     }
 
+
     pub async fn read(&self, key: Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
         let shard_index = LruMemoryCache::get_shard_index(&key);
         let mut shard = self.message[shard_index].write().await;
@@ -130,15 +141,26 @@ impl LruMemoryCache {
         shard.downgrade()
     }
 
-    pub async fn get_lock_write(&self, key: &Arc<String>) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
+    pub async fn get_lock_write(
+        &self,
+        key: &Arc<String>,
+    ) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
         self.put(key.clone()).await
     }
 
-    pub async fn get_lock_read(&self, key: &Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
+    pub async fn get_lock_read(
+        &self,
+        key: &Arc<String>,
+    ) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
         self.read(key.clone()).await
     }
 
-    pub async fn get_lock_delete(&self, key: &Arc<String>) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
-        self.pop(key.clone()).await
+    pub async fn get_lock_delete(
+        &self,
+        key: &Arc<String>,
+    ) -> tokio::sync::RwLockWriteGuard<'_, LruNode> {
+        let shard_index = LruMemoryCache::get_shard_index(&key);
+        let shard = self.message[shard_index].write().await;
+        Self::pop(shard,key.clone()).await
     }
 }

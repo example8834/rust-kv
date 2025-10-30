@@ -13,8 +13,8 @@ impl<'a> LockedDb<'a> {
         value: ValueEntry,
     ) {
         if let LockType::Write(ref mut map) = self.guard {
-            let mut db_store = map.db_store.clone();
-            let size_before= match db_store.get(&key){
+            //let mut db_store = map.db_store.clone();
+            let size_before= match map.db_store.get(&key){
                 Some(entry) => entry.data_size,
                 None => 0,
             };
@@ -25,7 +25,7 @@ impl<'a> LockedDb<'a> {
             //同时传递全局修改
             map.global_memory.fetch_add(size_differ, std::sync::atomic::Ordering::SeqCst);
             //插入数值的时候 消耗掉这个
-            db_store.insert(key, value);
+            map.db_store.insert(key, value);
         } else {
             panic!("Attempted to write with a read lock");
         };

@@ -34,6 +34,7 @@ impl CommandExecutor for SetCommand {
                 data_size: self.value.len(),
             },
         };
+
         //获取之后立刻使用。减少锁持有时间
         let db_lock = ctx.db.store.lock_write(&self.key).await;
         //这里的self

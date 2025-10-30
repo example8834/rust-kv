@@ -129,11 +129,11 @@ impl LruMemoryCache {
     }
 
 
-    pub async fn read(&self, key: Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
+    pub async fn read(&self, key: &Arc<String>) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
         let shard_index = LruMemoryCache::get_shard_index(&key);
         let mut shard = self.message[shard_index].write().await;
         // 必须用 if let 或 match 来安全地处理
-        if let Some(meta_ptr) = shard.map_key.get(&key) {
+        if let Some(meta_ptr) = shard.map_key.get(key) {
             //接下来就是在这个分片上操作
             let node_ptr = meta_ptr.lru_node;
             shard.list.push_mid_back(node_ptr);
@@ -152,7 +152,7 @@ impl LruMemoryCache {
         &self,
         key: &Arc<String>,
     ) -> tokio::sync::RwLockReadGuard<'_, LruNode> {
-        self.read(key.clone()).await
+        self.read(key).await
     }
 
     pub async fn get_lock_delete(

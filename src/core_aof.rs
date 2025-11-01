@@ -17,6 +17,7 @@ use crate::Db;
 // 定义管道里传递的消息类型，这里就是序列化后的命令
 pub type AofMessage = Vec<u8>;
 
+
 pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str) {
     // 打开 AOF 文件
     let mut file = BufWriter::new(
@@ -41,6 +42,7 @@ pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str) {
 
         // **核心的批量获取逻辑**
         // 尽最大努力，一次性从管道中取出所有等待的消息
+        // 较少通道占用时间 
         while let Ok(msg) = rx.try_recv() {
             buffer.push(msg);
         }

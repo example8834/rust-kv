@@ -1,9 +1,5 @@
 use std::{
-    cmp::Reverse,
-    collections::BinaryHeap,
-    f32::consts::E,
-    sync::{Arc, atomic::Ordering},
-    time::Duration,
+    cmp::Reverse, collections::BinaryHeap, f32::consts::E, sync::{Arc, atomic::Ordering}, thread::JoinHandle, time::Duration
 };
 
 use rand::Rng;
@@ -22,8 +18,8 @@ impl Storage {
     /**
      * 淘汰逻辑
      */
-    pub fn eviction_ttl(self) {
-        let _ = tokio::spawn(async move {
+    pub fn eviction_ttl(self)  {
+        let _  = tokio::spawn(async move {
             loop {
                 //刚开始睡眠 等待数据进入检测
                 tokio::time::sleep(Duration::from_millis(100)).await;

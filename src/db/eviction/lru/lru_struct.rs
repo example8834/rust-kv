@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, atomic::AtomicUsize},
 };
 
-use fxhash::FxHasher;
+use fxhash::{FxHasher, hash};
 use std::hash::{Hash, Hasher};
 use tokio::sync::RwLock;
 
@@ -54,6 +54,7 @@ impl LruMemoryCache {
 
         // 4. 取模
         (hash_value as usize) % NUM_SHARDS
+
     }
     pub fn new() -> Self {
         let mut message = Vec::with_capacity(NUM_SHARDS);

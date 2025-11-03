@@ -73,7 +73,7 @@ pub async fn run() {
                     panic!("aof 清理失败  {}", e)
                 }
                 _ => {
-                    print!("aof数据恢复成功")
+                    println!("aof数据恢复成功")
                 }
             }
         })

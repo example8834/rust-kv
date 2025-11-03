@@ -17,7 +17,7 @@ pub struct ShutDown{
 }
 impl ShutDown{
     pub async fn shutdown(self){
-       print!("开始执行");
+       println!("开始执行关闭流程");
        //接收任务关闭
        let connect = self.connect_task.await.unwrap();
        //所有权这个 必须获取锁 然后内部置换 对象共享的 你不能直接消费所有权 所以只能置换出来所有权 

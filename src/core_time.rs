@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio;
+use tokio::io::Join;
+use tokio::sync::broadcast::Sender;
 
 // 1. 定义一个全局、原子性的 u64，用于存储缓存的毫秒级时间戳
 pub static CACHED_TIME_MS: AtomicU64 = AtomicU64::new(0);
@@ -14,16 +16,23 @@ fn system_time_ms() -> u64 {
 }
 
 // 在您的服务器启动时，只执行一次
-pub fn start_time_caching_task() {
+pub async fn start_time_caching_task(sender: Sender<()>) {
     // 初始化第一次的时间
     CACHED_TIME_MS.store(system_time_ms(), Ordering::Relaxed);
-
     // 启动一个独立的后台任务
     tokio::spawn(async move {
+        let mut receiver = sender.subscribe();
         loop {
+            tokio::select! {
+                _= tokio::time::sleep(Duration::from_millis(10)) =>{
+
+                },
+                _= receiver.recv() =>{
+                    break;
+                }
+            }
             // 每 10 毫秒更新一次全局时间
             CACHED_TIME_MS.store(system_time_ms(), Ordering::Relaxed);
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     });
 }

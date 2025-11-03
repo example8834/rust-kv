@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::sync::broadcast::Sender;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{self, Duration};
 
@@ -18,7 +19,7 @@ use crate::Db;
 pub type AofMessage = Vec<u8>;
 
 
-pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str) {
+pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str, sender:Sender<()>) {
     // 打开 AOF 文件
     let mut file = BufWriter::new(
         OpenOptions::new()
@@ -32,11 +33,16 @@ pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str) {
     // 创建一个每秒触发一次的定时器
     let mut interval: time::Interval = time::interval(Duration::from_secs(1));
     let mut buffer: Vec<AofMessage> = Vec::with_capacity(128);
-
+    let mut receiver = sender.subscribe();
     loop {
-        // 等待下一个定时器事件
-        interval.tick().await;
+        tokio::select! {
+            _= interval.tick() =>{
 
+            },
+            _= receiver.recv() =>{
+                    break;
+                }
+        }
         // 清空上次的缓冲区
         buffer.clear();
 

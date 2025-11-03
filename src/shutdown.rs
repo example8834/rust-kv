@@ -1,12 +1,49 @@
-use tokio::signal;
-use tokio::sync::broadcast; // 用广播来通知所有任务
+use std::mem;
+use std::sync::Arc;
 
-pub struct service{
-    
+use tokio::signal;
+use tokio::sync::broadcast::Sender;
+use tokio::sync::{Mutex, broadcast};
+use tokio::task::JoinHandle; // 用广播来通知所有任务
+use futures::future::join_all;
+
+pub struct ShutDown{
+    pub aof_task : JoinHandle<()>,
+    pub time_task : JoinHandle<()>,
+    pub eviction_memory_task: JoinHandle<Arc<Mutex<Vec<JoinHandle<()>>>>>,
+    pub eviction_ttl_task :JoinHandle<()>,
+    pub connect_task: JoinHandle<Arc<Mutex<Vec<JoinHandle<()>>>>>,
+    pub infra_shutdown_tx: Sender<()>
 }
+impl ShutDown{
+    pub async fn shutdown(self){
+       print!("开始执行");
+       //接收任务关闭
+       let connect = self.connect_task.await.unwrap();
+       //所有权这个 必须获取锁 然后内部置换 对象共享的 你不能直接消费所有权 所以只能置换出来所有权 
+       let connect_handle_vec = mem::take(&mut *connect.lock().await); // 把 Vec 拿走，guard 里变成 Vec::new()
+       //等待数组内部的连接
+       join_all(connect_handle_vec).await;
+
+       //淘汰算法的停止 
+       let _ = self.eviction_ttl_task.await;
+       let eviction_memory =  self.eviction_memory_task.await.unwrap();
+       let eviction_memory_vec = mem::take(&mut *eviction_memory.lock().await);
+       //等待数组内部的连接
+       join_all(eviction_memory_vec).await;
+
+       //aof缓存停止
+       let _ = self.aof_task.await;
+
+       //时间更新停止
+       self.infra_shutdown_tx.send(()).expect("failed to send shutdown broadcast");
+       let _ = self.time_task.await;
+    }
+}
+
 // (这是在 Unix/Linux/macOS 上的写法)
 #[cfg(unix)]
-async fn shutdown_listener(shutdown_tx: broadcast::Sender<()>) {
+pub async fn shutdown_listener(shutdown_tx: broadcast::Sender<()>) {
     // 1. 监听 Ctrl+C (SIGINT)
     let ctrl_c = async {
         signal::ctrl_c().await.expect("failed to listen for ctrl-c");

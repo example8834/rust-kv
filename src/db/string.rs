@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 
 use crate::{
     core_time::get_cached_time_ms,
@@ -21,9 +21,7 @@ impl<'a> LockedDb<'a> {
             //值差异
             let size_differ = value.data_size - size_before;
             //添加内存使用情况
-            map.approx_memory.fetch_add(size_differ, std::sync::atomic::Ordering::SeqCst);
-            //同时传递全局修改
-            map.global_memory.fetch_add(size_differ, std::sync::atomic::Ordering::SeqCst);
+            map.approx_memory.fetch_add(size_differ, Ordering::Relaxed);
             //插入数值的时候 消耗掉这个
             map.db_store.insert(key, value);
         } else {

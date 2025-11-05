@@ -14,7 +14,6 @@ use tokio::{sync::Mutex, time::Instant};
 const EVICTION_MAX_NUMBER: usize = 5;
 
 use crate::{
-    config::GLOBAL_MEMORY,
     core_time::get_cached_time_ms,
     db::{Storage, eviction::lru::lru_struct::LruMemoryCache},
     shutdown,
@@ -74,7 +73,6 @@ impl Storage {
                             //更新分片和整体内存数据
                             let data_size = value.data_size;
                             shard.approx_memory.fetch_sub(data_size, Ordering::Relaxed);
-                            shard.global_memory.fetch_sub(data_size, Ordering::Relaxed);
                             //调用方法删除
                             let _ = LruMemoryCache::pop(shard, key).await;
                         }
@@ -94,7 +92,6 @@ impl Storage {
         let shutdown_clone = shutdown_tx.clone();
         let task_vec: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>> = Arc::new(Vec::new().into());
         let task_vec_clone = task_vec.clone();
-
         //定时任务接收者
         loop {
             let mut shutdown = shutdown_clone.clone().subscribe();
@@ -107,13 +104,15 @@ impl Storage {
 
                 }
             }
-            if GLOBAL_MEMORY.load(Ordering::Relaxed) > target_memory {
+            let store = self.store.clone();
+            if Storage::get_global_memory(store.clone()).await > target_memory {
                 //根据指标挑选前五的分片
                 let mut shard_indices: BinaryHeap<Reverse<(usize, usize, usize)>> =
                     BinaryHeap::with_capacity(EVICTION_MAX_NUMBER);
                 for db_index in 0..16 {
                     for shard_index in 0..32 {
-                        let shard = self.store[db_index].message[shard_index].read().await;
+                        let store = self.store.clone();
+                        let shard = store[db_index].message[shard_index].read().await;
                         let memory = shard.approx_memory.load(Ordering::Relaxed);
                         //跳过为空的
                         if memory == 0 {
@@ -131,8 +130,9 @@ impl Storage {
                     //每次循环都需要克隆
                     let shutdown_clone = shutdown_tx.clone();
                     let (_, db_index, shard_index) = item.0;
+                    let store = store.clone();
                     //先获取锁 然后执行指定的时间段
-                    let shard = self.store[db_index].message[shard_index].clone();
+                    let shard = store[db_index].message[shard_index].clone();
                     // 内存超了，开一个任务
                     let task_delete = tokio::spawn(async move {
                         let mut shard_lock = shard.write().await;
@@ -151,8 +151,9 @@ impl Storage {
 
                                 }
                             }
-                            //再次精确判断
-                            if GLOBAL_MEMORY.load(Ordering::Relaxed) > target_memory {
+
+                            //再次精确判断 锁内部判断就完全没有问题了
+                            if Storage::get_global_memory(store.clone()).await > target_memory {
                                 if let Some(key) = shard_lock.list.pop_front() {
                                     let data_size =
                                         shard_lock.db_store.get(&key).unwrap().data_size;
@@ -178,9 +179,6 @@ impl Storage {
                                         shard_lock
                                             .approx_memory
                                             .fetch_sub(data_size, Ordering::Relaxed);
-                                        shard_lock
-                                            .global_memory
-                                            .fetch_sub(data_size, Ordering::Relaxed);
                                         processed_count += 1;
                                     }
                                 } else {
@@ -202,5 +200,20 @@ impl Storage {
             }
         }
         task_vec
+    }
+    //这个异步方法确实不错
+    //通过计算获取全局数据总和
+    pub async fn get_global_memory(store :Arc<Vec<Arc<LruMemoryCache>>>) ->usize {
+        let mut global_memory  = 0;
+        //这个是通过计算每个分片获取数据
+            for db_index in 0..16 {
+                
+                for shard_index in 0..32 {
+                    let shard = store[db_index].message[shard_index].read().await;
+                    let shard_memory = shard.approx_memory.load(Ordering::Relaxed);
+                    global_memory += shard.approx_memory.load(Ordering::Relaxed);
+                }
+            }
+        global_memory
     }
 }

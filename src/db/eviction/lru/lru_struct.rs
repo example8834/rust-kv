@@ -9,7 +9,6 @@ use std::hash::{Hash, Hasher};
 use tokio::sync::RwLock;
 
 use crate::{
-    config::GLOBAL_MEMORY,
     db::eviction::lru::lru_linklist::{LruList, Node},
     types::ValueEntry,
 };
@@ -22,7 +21,6 @@ pub struct LruNode {
     pub sample_keys: Vec<Arc<String>>, // O(1) 采样数组
     pub db_store: HashMap<Arc<String>, ValueEntry>,
     pub approx_memory: AtomicUsize, // 它自己分片的账 记录具体的内存大小
-    pub global_memory: Arc<AtomicUsize>, // 它也持有 Arc 指针
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +63,6 @@ impl LruMemoryCache {
                 sample_keys: Vec::new(),
                 db_store: HashMap::new(),
                 approx_memory: AtomicUsize::new(0).into(),
-                global_memory: Arc::clone(&GLOBAL_MEMORY),
             })));
         }
         Self { message }

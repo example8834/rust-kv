@@ -19,9 +19,3 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| {
     }
 });
 
-
-// 它是一个“懒加载”的、线程安全的、全局唯一的 Arc<AtomicUsize>
-pub static GLOBAL_MEMORY: Lazy<Arc<AtomicUsize>> = Lazy::new(|| {
-    // 这里的代码只会在程序第一次访问 GLOBAL_MEMORY 时执行一次
-    Arc::new(AtomicUsize::new(0))
-});

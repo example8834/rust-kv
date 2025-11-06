@@ -47,6 +47,9 @@ pub async fn run() {
     //地基停止 广播
     let (infra_shutdown_tx, _) = broadcast::channel::<()>(1);
 
+    // 创建一个容量为 50 的“池”（通道）
+    let (lua_vm_sender, lua_vm_receiver) = flume::bounded::<()>(50);
+
     let aop_file_path = "database.aof";
     // 启动专门的 AOF 写入后台任务
     let aof_task = tokio::spawn(aof_writer_task(rx, aop_file_path, app_shutdown_tx.clone()));

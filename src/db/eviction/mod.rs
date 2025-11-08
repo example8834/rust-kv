@@ -17,6 +17,7 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 
 pub mod lfu;
 pub mod lru;
+pub mod eviction_alo;
 
 pub const NUM_SHARDS: usize = 32; // 32 个分片
 

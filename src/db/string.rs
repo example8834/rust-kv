@@ -1,9 +1,7 @@
 use std::sync::{Arc, atomic::Ordering};
 
 use crate::{
-    core_time::get_cached_time_ms,
-    db::{LockType, LockedDb, eviction::EvictionManager},
-    types::ValueEntry,
+    core_time::get_cached_time_ms, db::LockedDb, types::ValueEntry
 };
 impl<'a> LockedDb<'a> {
     // --- 现在你的 set_string 方法变得极其清晰 ---
@@ -12,7 +10,7 @@ impl<'a> LockedDb<'a> {
         key: Arc<String>,
         value: ValueEntry,
     ) {
-        if let LockType::Write(ref mut map) = self.guard {
+        if let LockedDb::Write(ref mut map) = self {
             //let mut db_store = map.db_store.clone();
             let size_before= match map.db_store.get(&key){
                 Some(entry) => entry.data_size,
@@ -30,7 +28,7 @@ impl<'a> LockedDb<'a> {
     }
 
     pub fn get_string(self, key: Arc<String>) -> Option<ValueEntry> {
-        if let LockType::Read(ref map) = self.guard {
+        if let LockedDb::Read(ref map) = self {
             if let Some(entry) = map.db_store.get(&key) {
                 let time_expires = entry.expires_at;
                 if let Some(expire_time) = time_expires {

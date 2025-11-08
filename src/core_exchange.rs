@@ -41,6 +41,8 @@ impl TryFrom<Frame> for Command {
                         SetCommand::exchange(iter, command_name)
                     }
                     "PING" => PingCommand::exchange(iter, command_name),
+                    //lua 脚本
+                    "EVAL" => PingCommand::exchange(iter, command_name),
 
                     // 4. 所有其他不认识的命令，都匹配到这里
                     _ => UnimplementCommand::exchange(iter, command_name),

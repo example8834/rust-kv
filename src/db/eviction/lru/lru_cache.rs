@@ -15,7 +15,7 @@ const EVICTION_MAX_NUMBER: usize = 5;
 
 use crate::{
     core_time::get_cached_time_ms,
-    db::{Storage, eviction::lru::lru_struct::LruMemoryCache},
+    db::{Storage, eviction::MemoryCache},
     shutdown,
 };
 
@@ -56,17 +56,14 @@ impl Storage {
                 let random_active_index = rand::thread_rng().gen_range(0..active_shards.len());
                 let (db_index, shard_index) = active_shards[random_active_index];
                 //抽取后获取锁
-                let shard = self.store[db_index].message[shard_index].write().await;
+                let mut shard = self.store[db_index].message[shard_index].write().await;
                 //获取锁后再次判断 如果没有数据就跳过了
                 if shard.approx_memory.load(Ordering::Relaxed) == 0 {
                     //说明这个分片已经没有数据了
                     active_shards.swap_remove(random_active_index);
                     continue;
                 }
-                //随机从当前分片 抽取一个key
-                let random_active_index = rand::thread_rng().gen_range(0..shard.sample_keys.len());
-                //获取key
-                let key = shard.sample_keys.get(random_active_index).cloned().unwrap();
+                let key = shard.evicition.get_random_sample_key().unwrap();
                 if let Some(value) = shard.db_store.get(&key) {
                     if let Some(expire_time) = value.expires_at {
                         if get_cached_time_ms() > expire_time {
@@ -74,7 +71,7 @@ impl Storage {
                             let data_size = value.data_size;
                             shard.approx_memory.fetch_sub(data_size, Ordering::Relaxed);
                             //调用方法删除
-                            let _ = LruMemoryCache::pop(shard, key).await;
+                            let _ = shard.evicition.on_delete(key);
                         }
                     }
                 }
@@ -154,33 +151,16 @@ impl Storage {
 
                             //再次精确判断 锁内部判断就完全没有问题了
                             if Storage::get_global_memory(store.clone()).await > target_memory {
-                                if let Some(key) = shard_lock.list.pop_front() {
+                                let key = shard_lock.evicition.pop_victim();
+                                if let Some(key) = key {
                                     let data_size =
                                         shard_lock.db_store.get(&key).unwrap().data_size;
-                                    //从map里获取出来各种索引 对于数据结构进行修改
-                                    if let Some(node_ptr) = shard_lock.map_key.remove(&key) {
-                                        //  从 Vec 中删除 (O(1))
-                                        let idx_to_remove = node_ptr.sample_idx;
-                                        shard_lock.sample_keys.swap_remove(idx_to_remove);
-
-                                        let moved_key_cloned =
-                                            shard_lock.sample_keys.get(idx_to_remove).cloned();
-
-                                        // 现在 `moved_key_cloned` 是一个拥有的值，它不借用 shard
-                                        if let Some(key) = moved_key_cloned {
-                                            // 6. 我们可以【安全地】对 shard 进行【可变借用】
-                                            if let Some(moved_meta) =
-                                                shard_lock.map_key.get_mut(&key)
-                                            {
-                                                moved_meta.sample_idx = idx_to_remove;
-                                            }
-                                        }
-                                        //现在删除内存更新分片和全局内存数据
-                                        shard_lock
-                                            .approx_memory
-                                            .fetch_sub(data_size, Ordering::Relaxed);
-                                        processed_count += 1;
-                                    }
+                                    shard_lock.evicition.on_delete(key);
+                                    //现在删除内存更新分片和全局内存数据
+                                    shard_lock
+                                        .approx_memory
+                                        .fetch_sub(data_size, Ordering::Relaxed);
+                                    processed_count += 1;
                                 } else {
                                     break;
                                 }
@@ -203,17 +183,15 @@ impl Storage {
     }
     //这个异步方法确实不错
     //通过计算获取全局数据总和
-    pub async fn get_global_memory(store :Arc<Vec<Arc<LruMemoryCache>>>) ->usize {
-        let mut global_memory  = 0;
+    pub async fn get_global_memory(store: Arc<Vec<Arc<MemoryCache>>>) -> usize {
+        let mut global_memory = 0;
         //这个是通过计算每个分片获取数据
-            for db_index in 0..16 {
-                
-                for shard_index in 0..32 {
-                    let shard = store[db_index].message[shard_index].read().await;
-                    let shard_memory = shard.approx_memory.load(Ordering::Relaxed);
-                    global_memory += shard.approx_memory.load(Ordering::Relaxed);
-                }
+        for db_index in 0..16 {
+            for shard_index in 0..32 {
+                let shard = store[db_index].message[shard_index].read().await;
+                global_memory += shard.approx_memory.load(Ordering::Relaxed);
             }
+        }
         global_memory
     }
 }

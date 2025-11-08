@@ -14,6 +14,7 @@ mod server;
 mod shutdown;
 mod types;
 
+use crate::config::CONFIG;
 use crate::context::{CONN_STATE, ConnectionContent, ConnectionState};
 use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
 use crate::core_execute::execute_command_normal;
@@ -62,7 +63,7 @@ pub async fn run() {
     println!("服务器启动，监听于 127.0.0.1:6379");
 
     //创建db
-    let mut db = Db::new();
+    let mut db = Db::new(&CONFIG.eviction_type);
     // 模拟一个新的客户端连接进来
     let client_addr = "192.168.1.10:54321".to_string();
     let initial_state = ConnectionState {

@@ -6,7 +6,7 @@ use std::{
     sync::{atomic::AtomicUsize, Arc, OnceLock},
     time::Instant,
 };
-mod eviction;
+pub mod eviction;
 mod generic;
 mod hash;
 mod list;
@@ -16,13 +16,9 @@ mod string;
 use tokio::sync::RwLock;
 
 use crate::{
-    context::{CONN_STATE, ConnectionState},
-    db::eviction::lru::lru_struct::{LruMemoryCache, LruNode},
-    error::KvError,
-    types::ValueEntry,
+    config::EvictionType, context::{CONN_STATE, ConnectionState}, db::eviction::{MemoryCache, MemoryCacheNode, lru::lru_struct::LruNode}, error::KvError, types::ValueEntry
 };
 
-pub(crate) use eviction::EvictionManager;
 
 // 3. 定义并公开那个唯一的、组合好的顶层结构
 #[derive(Clone)]
@@ -30,47 +26,46 @@ pub struct Db {
     pub store: Storage,
 }
 impl Db {
-    pub fn new() -> Self {
+    pub fn new(config_type: &EvictionType) -> Self {
         Self {
-            store: Storage::new(),
+            store: Storage::new(config_type),
         }
     }
 }
 // 1. 让 Value 枚举本身可以 Clone
 
-// 这是一个新的、公开的结构体
-// 它的生命周期 'a 被绑定到它持有的 MutexGuard
-pub struct LockedDb<'a> {
-    // 关键：它持有锁的守卫，但这个字段是私有的！
-    // 外界无法通过 LockedDb 直接访问 guard.data
-    pub guard: LockType<'a>,
-}
+
 
 //这个的粒度就是基本的粒度
-pub enum LockType<'a> {
-    Write(tokio::sync::RwLockWriteGuard<'a, LruNode>),
-    Read(tokio::sync::RwLockReadGuard<'a, LruNode>),
+pub enum LockedDb<'a> {
+    Write(tokio::sync::RwLockWriteGuard<'a, MemoryCacheNode>),
+    Read(tokio::sync::RwLockReadGuard<'a, MemoryCacheNode>),
 }
+
+
 
 // 这个数组 最外层的arc 是为了共享
 #[derive(Clone, Default)]
 pub struct Storage {
-    pub(crate) store: Arc<Vec<Arc<LruMemoryCache>>>,
+    pub(crate) store: Arc<Vec<Arc<MemoryCache>>>,
 }
+
+//内核通用接口
+
 
 //其实理论上操作需要绑定数据 并且内聚的情况下。理论上操作db 就应该核心的方法收拾有db提供 外部不应该耦合到db内部
 //db内部就应该提供方法 如果外部执行指令 都需要调用db 也不错 就是如果无法接偶 db提供方法尽量底层 让外部拼接
 //也是不错的 如果就需要和db底层耦合比较多的情况下 那大部分方法 涉及底层操作 需要db的封装比较多 可以分开不同文件来增加可读性
 impl Storage {
     // 提供一个公共的构造函数
-    pub fn new() -> Self {
+    pub fn new(config_type: &EvictionType) -> Self {
         // 1. 先拿到一个“空”的 self (store 是个空 Vec)
-       let mut local_vec: Vec<Arc<LruMemoryCache>> = Vec::with_capacity(16);
+       let mut local_vec: Vec<Arc<MemoryCache>> = Vec::with_capacity(16);
 
         //默认创建 16 个数据库
         for _ in 0..16 {
             // 假设 LruMemoryCache 也有一个 new()
-            local_vec.push(Arc::new(LruMemoryCache::new()));
+            local_vec.push(Arc::new(MemoryCache::new(config_type)));
         }
 
         // 4. 返回“初始化好”的 self
@@ -82,24 +77,19 @@ impl Storage {
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
     pub async fn lock_write(&self, key: &Arc<String>) -> LockedDb<'_> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb {
-            guard: LockType::Write(self.store.get(select_db).unwrap().get_lock_write(key).await),
-        }
+        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_write(key).await)
     }
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
     pub async fn lock_read(&self, key: &Arc<String>) -> LockedDb<'_> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb {
-            guard: LockType::Read(self.store.get(select_db).unwrap().get_lock_read(key).await),
-        }
+        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_read(key).await)
+        
     }
 
     pub async fn lock_delete(&self, key: &Arc<String>) -> LockedDb<'_> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb {
-            guard: LockType::Write(self.store.get(select_db).unwrap().get_lock_delete(key).await),
-        }
+        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_delete(key).await)
     }
 }
 

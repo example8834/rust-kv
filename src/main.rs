@@ -25,7 +25,7 @@ mod tests {
     #[tokio::test]
     async fn test_lua_hello_world() {
         // 1. 创建 Lua 虚拟机
-        let lua = Lua::new();
+        let lua: Lua = Lua::new();
 
         // 2. 异步执行脚本
         //    (我们用 .await 替代了 .unwrap() 来处理异步)

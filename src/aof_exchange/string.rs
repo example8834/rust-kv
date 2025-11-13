@@ -8,9 +8,9 @@ impl CommandAofExchange for SetCommand {
     async fn execute_aof<'ctx>(
         self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: &'ctx CommandContext<'ctx>
+        ctx:  CommandContext<'ctx>
     ) -> Result<Frame, KvError> {
-        if ctx.tx.is_none(){
+        if ctx.command_context.is_none(){
             return Ok(Frame::Simple("OK".to_string()));
         }
         let mut frame_vec = vec![crate::error::Frame::Bulk(Bytes::from("SET".to_string()))];
@@ -40,8 +40,8 @@ impl CommandAofExchange for SetCommand {
                 },
             }
         }
-        if let Some(sender) = ctx.tx {
-            if let Err(e) = sender.send(Frame::Array(frame_vec).serialize()).await {
+        if let Some(sender) = ctx.command_context {
+            if let Err(e) = sender.aof_tx.send(Frame::Array(frame_vec).serialize()).await {
                 eprintln!("发送AOF消息失败: {}", e);
             }
             Ok(Frame::Simple("OK".to_string()))

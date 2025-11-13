@@ -25,19 +25,14 @@ enum ConnectionEvent {
 pub async fn handle_connection(
     mut socket: TcpStream,
     mut db: Db,
-    connection_content: ConnectionContent,
+    mut connection_content: ConnectionContent,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // 1. 使用 Vec<u8> 作为缓冲区
     let mut buf = BytesMut::with_capacity(1024);
     // 目前来说用的模式是1 是 redis 格式 0 是单个字符模式
     let type_fix = 1;
-    //连接状态
-    let mut conn_state = ConnectionState {
-        selected_db: 0,
-        client_address: None,
-    };
     //创建订阅者
-    let mut receiver = connection_content.shutdown_tx.subscribe();
+    let mut receiver = connection_content.shutdown_tx.clone().subscribe();
     // 4. 在该连接的循环中读取数据
     'connection_loop: loop {
         let event = tokio::select! {
@@ -75,8 +70,7 @@ pub async fn handle_connection(
                     match explain_execute_command(
                         &mut buf,
                         &mut db,
-                        &connection_content.aof_tx,
-                        &mut conn_state,
+                        &mut connection_content,
                     )
                     .await
                     {
@@ -124,8 +118,7 @@ pub async fn handle_connection(
 async fn explain_execute_command(
     buf: &mut BytesMut,
     db: &mut Db,
-    tx: &Sender<AofMessage>,
-    command_context: &mut ConnectionState,
+    command_content: &mut ConnectionContent,
 ) -> Result<Vec<Vec<u8>>, Box<dyn Error + Send + Sync>> {
     let mut vec_result: Vec<Vec<u8>> = Vec::new();
     let mut vec: &[u8] = buf.as_ref();
@@ -152,7 +145,7 @@ async fn explain_execute_command(
             Ok(frame) => match frame {
                 _ => {
                     //这个事指令错误 而不是结构化错误
-                    let result = execute_command_normal(frame, db, tx, command_context).await?;
+                    let result = execute_command_normal(frame, db, command_content).await?;
                     vec_result.push(result.serialize());
                     vec = &vec[size..];
                     total_size += size;

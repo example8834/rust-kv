@@ -13,7 +13,7 @@ use crate::{
 
 impl CommandExecutor for SetCommand {
     // 必须在这里也加上 <'ctx> 和对应的生命周期标注
-    async fn execute<'ctx>(self, ctx: &'ctx mut CommandContext<'ctx>) -> Result<Frame, KvError> {
+    async fn execute<'ctx>(self, ctx: CommandContext<'ctx>) -> Result<Frame, KvError> {
         let time_expire_u64: Option<u64>;
         let time_expire = if let Some(expire) = &self.expiration {
             time_expire_u64 = Some(calculate_expiration_timestamp_ms(expire));
@@ -49,7 +49,7 @@ impl CommandExecutor for GetCommand {
     async fn execute<'ctx>(
         self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: &'ctx mut CommandContext<'ctx>,
+        ctx: CommandContext<'ctx>
     ) -> Result<Frame, KvError> {
         let db_lock = ctx.db.store.lock_read(&self.key).await;
         let value = db_lock.get_string(self.key);

@@ -1,10 +1,5 @@
 use std::{
-    cmp::Reverse,
-    collections::BinaryHeap,
-    f32::consts::E,
-    sync::{Arc, atomic::Ordering},
-    thread::JoinHandle,
-    time::Duration,
+    cmp::Reverse, collections::BinaryHeap, f32::consts::E, sync::{Arc, atomic::Ordering}, thread::JoinHandle, time::Duration, u32, usize
 };
 
 use rand::Rng;
@@ -102,7 +97,7 @@ impl Storage {
                 }
             }
             let store = self.store.clone();
-            if Storage::get_global_memory(store.clone()).await > target_memory {
+            if Storage::get_global_memory(store.clone(),target_memory).await {
                 //根据指标挑选前五的分片
                 let mut shard_indices: BinaryHeap<Reverse<(usize, usize, usize)>> =
                     BinaryHeap::with_capacity(EVICTION_MAX_NUMBER);
@@ -150,7 +145,7 @@ impl Storage {
                             }
 
                             //再次精确判断 锁内部判断就完全没有问题了
-                            if Storage::get_global_memory(store.clone()).await > target_memory {
+                            if Storage::get_global_memory(store.clone(),target_memory).await {
                                 let key = shard_lock.evicition.pop_victim();
                                 if let Some(key) = key {
                                     let data_size =
@@ -182,16 +177,20 @@ impl Storage {
         task_vec
     }
     //这个异步方法确实不错
-    //通过计算获取全局数据总和
-    pub async fn get_global_memory(store: Arc<Vec<Arc<MemoryCache>>>) -> usize {
+    //通过计算获取全局数据总和 
+    //锁资源一定要精确计算获取
+    pub async fn get_global_memory(store: Arc<Vec<Arc<MemoryCache>>>,max_size:usize) -> bool {
         let mut global_memory = 0;
         //这个是通过计算每个分片获取数据
         for db_index in 0..16 {
             for shard_index in 0..32 {
                 let shard = store[db_index].message[shard_index].read().await;
                 global_memory += shard.approx_memory.load(Ordering::Relaxed);
+                if global_memory > max_size {
+                    return true;
+                }
             }
         }
-        global_memory
+        return false;
     }
 }

@@ -13,6 +13,7 @@ mod error;
 mod server;
 mod shutdown;
 mod types;
+mod lua;
 
 use crate::config::CONFIG;
 use crate::context::{CONN_STATE, ConnectionContent, ConnectionState};
@@ -23,9 +24,12 @@ use crate::core_time::start_time_caching_task;
 use crate::db::Db;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
+use crate::lua::lua_vm::init_lua_vm;
 use crate::server::handle_connection;
 use crate::shutdown::{ShutDown, shutdown_listener};
 use bytes::{Buf, BytesMut};
+use mlua::Lua;
+use tokio::runtime;
 use tokio::task::JoinHandle;
 use std::error::Error;
 use std::sync::Arc;
@@ -49,8 +53,13 @@ pub async fn run() {
     let (infra_shutdown_tx, _) = broadcast::channel::<()>(1);
 
     // 创建一个容量为 50 的“池”（通道）
-    let (lua_vm_sender, lua_vm_receiver) = flume::bounded::<()>(50);
+    let (lua_vm_sender, lua_vm_receiver) = flume::bounded::<Lua>(50);
 
+    //初始化lua 环境条件
+    let (lua_runtime,lua_handle) = init_lua_vm(lua_vm_sender).await;
+
+
+    
     let aop_file_path = "database.aof";
     // 启动专门的 AOF 写入后台任务
     let aof_task = tokio::spawn(aof_writer_task(rx, aop_file_path, app_shutdown_tx.clone()));
@@ -68,7 +77,7 @@ pub async fn run() {
     let client_addr = "192.168.1.10:54321".to_string();
     let initial_state = ConnectionState {
         selected_db: 0, // 默认连接到 1 号数据库
-        client_address: Some(client_addr),
+        client_address: Some(client_addr)
     };
     CONN_STATE
         .scope(initial_state, async {
@@ -108,6 +117,7 @@ pub async fn run() {
             let connect_content = ConnectionContent {
                 aof_tx: aof_tx.clone(),
                 shutdown_tx: connect_shutdown.clone(),
+                lua_handle:lua_handle.clone()
             };
             let mut receiver = connect_content.shutdown_tx.subscribe();
             // 等待一个新的客户端连接
@@ -134,7 +144,7 @@ pub async fn run() {
 
             let initial_state = ConnectionState {
                 selected_db: 0, // 默认连接到 1 号数据库
-                client_address: Some(addr.to_string()),
+                client_address: Some(addr.to_string())
             };
             // CONN_STATE
             //     .scope(initial_state, async {

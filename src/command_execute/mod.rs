@@ -8,14 +8,14 @@ use itoa::Buffer;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    context::ConnectionState, core_aof::AofMessage, core_time::get_cached_time_ms, db::Db, error::{Frame, KvError}
+    context::{ConnectionContent, ConnectionState}, core_aof::AofMessage, core_time::get_cached_time_ms, db::Db, error::{Frame, KvError}
 };
  mod common;
  mod string;
 
 pub struct CommandContext<'a> {
     pub db: &'a mut Db,
-    pub tx: &'a Option<&'a Sender<AofMessage>>,
+    pub command_context: Option<&'a mut ConnectionContent>,
 }
 
 pub trait CommandExecutor {
@@ -23,7 +23,7 @@ pub trait CommandExecutor {
     fn execute<'ctx>(
         self,
         // ✅ 核心改动：从 &mut CommandContext 变成了 &CommandContext
-        ctx: &'ctx mut  CommandContext<'ctx>,
+        ctx:  CommandContext<'ctx>,
     ) -> impl std::future::Future<Output = Result<Frame, KvError>> + Send ;
 
     // “原语”方法

@@ -1,6 +1,6 @@
-use crate::context::ConnectionState;
 use crate::Db;
 use crate::command_execute::{CommandContext, CommandExecutor};
+use crate::context::{ConnectionContent, ConnectionState};
 use crate::core_aof::AofMessage;
 use crate::error::{Command, Expiration, Frame, IsAof, KvError, ToBulk};
 use bytes::Bytes;
@@ -17,22 +17,24 @@ use tracing_subscriber::registry::Data;
 pub async fn execute_command(command: Command, db: &mut Db) -> Result<Frame, KvError> {
     // 在调用时直接转换 None 的类型
     // 这个调用现在是完全正确的，因为 `HookFn` 的定义和 `execute_command_hook` 的要求完美匹配
-    let result = execute_command_hook(command, db, &None).await;
+    let result = execute_command_hook(command, db, None).await;
     result
 }
 
 pub async fn execute_command_hook(
     command: Command,
-    db: & mut Db, // post_write_hook 是一个可选的闭包
-    tx: & Option<&Sender<AofMessage>>,
+    db: &mut Db, // post_write_hook 是一个可选的闭包
+    command_context: Option<&mut ConnectionContent>,
 ) -> Result<Frame, KvError> {
-    let mut  command_context = CommandContext { db:db, tx: tx };
-    let context = & mut command_context;
+    let command_context = CommandContext {
+        db,
+        command_context,
+    };
     match command {
-        Command::Get(get) => get.execute(context).await,
-        Command::Set(set) => set.execute(context).await,
-        Command::Ping(ping) => ping.execute( context).await,
-        Command::Unimplement(unimplement) => unimplement.execute(context).await,
+        Command::Get(get) => get.execute(command_context).await,
+        Command::Set(set) => set.execute(command_context).await,
+        Command::Ping(ping) => ping.execute(command_context).await,
+        Command::Unimplement(unimplement) => unimplement.execute(command_context).await,
     }
 }
 
@@ -40,14 +42,11 @@ pub async fn execute_command_hook(
 pub async fn execute_command_normal(
     command: Command,
     db: &mut Db,
-    tx: &Sender<AofMessage>, // 假设你已经改成了接收所有权的 Sender
-    command_context:& mut ConnectionState
+    command_context: &mut ConnectionContent,
 ) -> Result<Frame, KvError> {
-    let frame: Frame = execute_command_hook(command, db, &Some(tx)).await?;
+    let frame: Frame = execute_command_hook(command, db, Some(command_context)).await?;
     Ok(frame)
 }
-
-
 
 impl Frame {
     pub fn serialize(&self) -> Vec<u8> {

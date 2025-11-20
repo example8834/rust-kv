@@ -12,6 +12,7 @@ use bytes::Bytes;
 impl TryFrom<Frame> for Command {
     type Error = KvError;
 
+    //就是类似构造函数的东西
     fn try_from(frame: Frame) -> Result<Self, Self::Error> {
         let frames = match frame {
             Frame::Array(frames) => frames,

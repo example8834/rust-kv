@@ -1,6 +1,6 @@
 use bytes::Bytes;
 
-use crate::{command_execute::{CommandContext, CommandExecutor}, error::{Frame, KvError, PingCommand, UnimplementCommand}};
+use crate::{command_execute::{CommandContext, CommandExecutor}, error::{EvalCommand, Frame, KvError, PingCommand, UnimplementCommand}, lua::lua_vm::lua_vm_redis_call};
 
 impl CommandExecutor for PingCommand {
     async fn execute<'ctx>(self, _ctx:  CommandContext<'ctx>) -> Result<Frame, KvError> {
@@ -20,5 +20,19 @@ impl CommandExecutor for UnimplementCommand {
         _ctx:  CommandContext<'ctx>
     ) -> Result<Frame, KvError> {
         Ok(Frame::Error(format!("ERR unknown command '{}'", self.command)))
+    }
+}
+
+/*
+ 这个是比较特殊的执行层
+ */
+impl CommandExecutor for EvalCommand {
+    async fn execute<'ctx>(
+        self,
+        ctx:  CommandContext<'ctx>,
+    ) -> Result<Frame, KvError>   {
+        let command_context = ctx.command_context.unwrap();
+        lua_vm_redis_call(command_context.receivce_lua,ctx.db.clone(),command_context.lua_handle);
+        Ok(())
     }
 }

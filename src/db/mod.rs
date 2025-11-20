@@ -16,7 +16,7 @@ mod string;
 use tokio::sync::RwLock;
 
 use crate::{
-    config::EvictionType, context::{CONN_STATE, ConnectionState}, db::eviction::{MemoryCache, MemoryCacheNode, lru::lru_struct::LruNode}, error::KvError, types::ValueEntry
+    config::EvictionType, context::{CONN_STATE, ConnectionState}, db::eviction::{KvOperator, MemoryCache, MemoryCacheNode, lru::lru_struct::LruNode}, error::KvError, types::ValueEntry
 };
 
 
@@ -38,8 +38,8 @@ impl Db {
 
 //这个的粒度就是基本的粒度
 pub enum LockedDb<'a> {
-    Write(tokio::sync::RwLockWriteGuard<'a, MemoryCacheNode>),
-    Read(tokio::sync::RwLockReadGuard<'a, MemoryCacheNode>),
+    Write(tokio::sync::RwLockWriteGuard<'a, dyn KvOperator>),
+    Read(tokio::sync::RwLockReadGuard<'a, dyn KvOperator>),
 }
 
 
@@ -83,7 +83,7 @@ impl Storage {
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
     pub async fn lock_read(&self, key: &Arc<String>) -> LockedDb<'_> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_read(key).await)
+        LockedDb::Read(self.store.get(select_db).unwrap().get_lock_read(key).await)
         
     }
 

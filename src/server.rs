@@ -142,10 +142,10 @@ async fn explain_execute_command(
     while let Ok(Some((frame, size))) = parse_frame(vec) {
         match Command::try_from(frame) {
             //这个错误事第一个指令就错误的错误 就是结构性质错误
-            Ok(frame) => match frame {
+            Ok(command) => match frame {
                 _ => {
                     //这个事指令错误 而不是结构化错误
-                    let result = execute_command_normal(frame, db, command_content).await?;
+                    let result: Frame = execute_command_normal(command, db, command_content).await?;
                     vec_result.push(result.serialize());
                     vec = &vec[size..];
                     total_size += size;

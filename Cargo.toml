@@ -32,6 +32,6 @@ rand="0.8"
 
 futures = "0.3"
 
-mlua = { version = "0.9", features = ["lua54", "vendored", "async"] }
+mlua = { version = "0.9", features = ["lua54", "vendored", "async","send"] }
 
 flume = "0.11"

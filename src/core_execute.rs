@@ -35,6 +35,7 @@ pub async fn execute_command_hook(
         Command::Set(set) => set.execute(command_context).await,
         Command::Ping(ping) => ping.execute(command_context).await,
         Command::Unimplement(unimplement) => unimplement.execute(command_context).await,
+        Command::EvalCommand(eval_command) => eval_command.execute(command_context).await,
     }
 }
 

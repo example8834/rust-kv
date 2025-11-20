@@ -35,7 +35,7 @@ impl Storage {
             for db_index in 0..16 {
                 for shard_index in 0..32 {
                     let shard = self.store[db_index].message[shard_index].read().await;
-                    if shard.approx_memory.load(Ordering::Relaxed) > 0 {
+                    if shard.as_lock_owner().unwrap().get_memory_usage() > 0 {
                         active_shards.push((db_index, shard_index));
                     }
                 }
@@ -53,20 +53,20 @@ impl Storage {
                 //抽取后获取锁
                 let mut shard = self.store[db_index].message[shard_index].write().await;
                 //获取锁后再次判断 如果没有数据就跳过了
-                if shard.approx_memory.load(Ordering::Relaxed) == 0 {
+                if shard.as_lock_owner().unwrap().get_memory_usage() == 0 {
                     //说明这个分片已经没有数据了
                     active_shards.swap_remove(random_active_index);
                     continue;
                 }
-                let key = shard.evicition.get_random_sample_key().unwrap();
-                if let Some(value) = shard.db_store.get(&key) {
+                let key = shard.as_lock_owner_mut().unwrap().get_eviction_policy().get_random_sample_key().unwrap();
+                if let Some(value) = shard.select(&key) {
                     if let Some(expire_time) = value.expires_at {
                         if get_cached_time_ms() > expire_time {
                             //更新分片和整体内存数据
                             let data_size = value.data_size;
-                            shard.approx_memory.fetch_sub(data_size, Ordering::Relaxed);
+                            shard.as_lock_owner().unwrap().add_memory(data_size);
                             //调用方法删除
-                            let _ = shard.evicition.on_delete(key);
+                            let _ = shard.as_lock_owner_mut().unwrap().get_eviction_policy().on_delete(key);
                         }
                     }
                 }
@@ -105,7 +105,7 @@ impl Storage {
                     for shard_index in 0..32 {
                         let store = self.store.clone();
                         let shard = store[db_index].message[shard_index].read().await;
-                        let memory = shard.approx_memory.load(Ordering::Relaxed);
+                        let memory = shard.as_lock_owner().unwrap().get_memory_usage();
                         //跳过为空的
                         if memory == 0 {
                             continue;
@@ -146,15 +146,14 @@ impl Storage {
 
                             //再次精确判断 锁内部判断就完全没有问题了
                             if Storage::get_global_memory(store.clone(),target_memory).await {
-                                let key = shard_lock.evicition.pop_victim();
+                                let key = shard_lock.as_lock_owner_mut().unwrap().get_eviction_policy().pop_victim();
                                 if let Some(key) = key {
                                     let data_size =
-                                        shard_lock.db_store.get(&key).unwrap().data_size;
-                                    shard_lock.evicition.on_delete(key);
+                                        shard_lock.select(&key).unwrap().data_size;
+                                    shard_lock.as_lock_owner_mut().unwrap().get_eviction_policy().on_delete(key);
                                     //现在删除内存更新分片和全局内存数据
                                     shard_lock
-                                        .approx_memory
-                                        .fetch_sub(data_size, Ordering::Relaxed);
+                                        .as_lock_owner().unwrap().sub_memory(data_size);
                                     processed_count += 1;
                                 } else {
                                     break;
@@ -185,7 +184,7 @@ impl Storage {
         for db_index in 0..16 {
             for shard_index in 0..32 {
                 let shard = store[db_index].message[shard_index].read().await;
-                global_memory += shard.approx_memory.load(Ordering::Relaxed);
+                global_memory += shard.as_lock_owner().unwrap().get_memory_usage();
                 if global_memory > max_size {
                     return true;
                 }

@@ -117,6 +117,7 @@ pub async fn run() {
             let connect_content = ConnectionContent {
                 aof_tx: aof_tx.clone(),
                 shutdown_tx: connect_shutdown.clone(),
+                receivce_lua:lua_vm_receiver.clone(),
                 lua_handle:lua_handle.clone()
             };
             let mut receiver = connect_content.shutdown_tx.subscribe();

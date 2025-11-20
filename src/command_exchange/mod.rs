@@ -6,7 +6,7 @@ use crate::error::{Command, Frame, KvError};
 mod string;
 mod common;
 /// 尝试从一个 Frame 中提取出 Bulk String 并转换为 String
-fn extract_bulk_string(frame: Option<Frame>) -> Result<String, KvError> {
+pub fn extract_bulk_string(frame: Option<Frame>) -> Result<String, KvError> {
     match frame {
         Some(Frame::Bulk(bytes)) => Ok(String::from_utf8(bytes.to_vec())
             .map_err(|e| KvError::ProtocolError(e.to_string()))?

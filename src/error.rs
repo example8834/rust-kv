@@ -2,7 +2,6 @@ use bytes::Bytes;
 use std::{io, sync::Arc};
 use thiserror::Error;
 
-
 // 1. 定义我们自己的错误类型
 #[derive(Debug, Error)]
 pub enum KvError {
@@ -23,22 +22,22 @@ pub enum KvError {
 }
 
 // 2. 定义客户端可以发送的命令
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub enum Command {
     Set(SetCommand), // 不再有 { ... }，而是直接包裹 Set 结构体
     Get(GetCommand),
     Ping(PingCommand),
-    Unimplement(UnimplementCommand)
+    Unimplement(UnimplementCommand),
+    EvalCommand(EvalCommand)
 }
-
 
 // 每一个 struct 现在都是一个独立的、清晰的命令“实体”
 #[derive(Debug, Clone)]
 pub struct SetCommand {
     pub key: Arc<String>,
     pub value: Bytes,
-    pub expiration: Option<Expiration>, 
-    pub condition: Option<SetCondition>
+    pub expiration: Option<Expiration>,
+    pub condition: Option<SetCondition>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,15 +56,22 @@ pub struct UnimplementCommand {
     pub args: Vec<Bytes>,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
+pub struct EvalCommand {
+    pub script: String,
+    pub keys:Vec<String>,
+    pub args:Vec<String>
+}
+
+#[derive(Debug, Clone)]
 pub enum Expiration {
-    EX(u64), // 秒
-    PX(u64), // 毫秒
+    EX(u64),   // 秒
+    PX(u64),   // 毫秒
     EXAT(u64), // 秒
     PXAT(u64), // 毫秒
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub enum SetCondition {
     NX, // Not Exists
     XX, // Exists
@@ -83,10 +89,10 @@ pub enum Frame {
 pub enum ToBulk {
     String(String),
     Btyes(Bytes),
-    Integer(i64)
+    Integer(i64),
 }
 
 pub enum IsAof {
     Yes,
-    No
+    No,
 }

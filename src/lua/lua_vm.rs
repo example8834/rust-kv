@@ -12,7 +12,7 @@ use crate::{
 /*
 处理lua 的vm 的脚本执行方法
 */
-pub async fn lua_vm_redis_call(receivce: Receiver<Lua>, db: Db, lua_handle: Handle) {
+pub async fn lua_vm_redis_call(receivce: Receiver<Lua>, db: & mut Db, lua_handle: Handle) {
     let lua = receivce.recv_async().await.unwrap();
     // 3.【核心】这就是你说的“回调结构”！
     //    我们正在创建一个 Lua 能调用的 Rust 异步函数
@@ -58,6 +58,7 @@ pub async fn lua_vm_redis_call(receivce: Receiver<Lua>, db: Db, lua_handle: Hand
     )?; // 'async_function' 是因为我们的 get/set 是 async 的
 
     
+
     let redis_table = lua
         .create_table()
         .map_err(|e| mlua::Error::runtime("redis.call 之后进行类型转换"))?;

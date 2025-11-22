@@ -35,7 +35,7 @@ impl Storage {
             for db_index in 0..16 {
                 for shard_index in 0..32 {
                     let shard = self.store[db_index].message[shard_index].read().await;
-                    if shard.as_lock_owner().unwrap().get_memory_usage() > 0 {
+                    if shard.db_store.get_memory_usage() > 0 {
                         active_shards.push((db_index, shard_index));
                     }
                 }

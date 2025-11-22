@@ -2,18 +2,15 @@ use bytes::Bytes;
 use tracing_subscriber::util;
 
 use crate::{
-    aof_exchange::CommandAofExchange,
-    command_execute::{
+    aof_exchange::CommandAofExchange, command_execute::{
         CommandContext, CommandExecutor, bytes_to_i64_fast, calculate_expiration_timestamp_ms,
         parse_int_from_bytes,
-    },
-    error::{Command, Expiration, Frame, GetCommand, KvError, SetCommand, ToBulk},
-    types::{Element, Value, ValueEntry},
+    }, db::LockedDb, error::{Command, Expiration, Frame, GetCommand, KvError, SetCommand, ToBulk}, types::{Element, Value, ValueEntry}
 };
 
 impl CommandExecutor for SetCommand {
     // 必须在这里也加上 <'ctx> 和对应的生命周期标注
-    async fn execute<'ctx>(self, ctx: CommandContext<'ctx>) -> Result<Frame, KvError> {
+    async fn execute<'ctx>(&self, ctx: CommandContext<'ctx>) -> Result<Frame, KvError> {
         let time_expire_u64: Option<u64>;
         let time_expire = if let Some(expire) = &self.expiration {
             time_expire_u64 = Some(calculate_expiration_timestamp_ms(expire));
@@ -23,39 +20,31 @@ impl CommandExecutor for SetCommand {
         };
         //再这里创建value
         let value_obj = match bytes_to_i64_fast(&self.value) {
-            Some(i) => ValueEntry {
-                data: Value::Simple(Element::Int(i)),
-                expires_at: time_expire,
-                data_size: std::mem::size_of_val(&i),
-            },
-            None => ValueEntry {
-                data: Value::Simple(Element::String(self.value.clone())),
-                expires_at: time_expire,
-                data_size: self.value.len(),
-            },
+            Some(i) => ValueEntry::new(Value::Simple(Element::Int(i)), time_expire),
+            None => ValueEntry::new(Value::Simple(Element::String(self.value.clone())), time_expire),
         };
-
-        //获取之后立刻使用。减少锁持有时间
-        let db_lock = ctx.db.store.lock_write(&self.key).await;
-        //这里的self
-        db_lock.set_string(self.key.clone(), value_obj);
-        //序列化问题
-        self.execute_aof(ctx).await?;
+        //ctx.db_lock.unwrap().set_string(self.key.clone(), value_obj);
+        if let Some(LockedDb::Write(mut map)) = ctx.db_lock {
+            map.insert(self.key.clone(), value_obj);
+        }
         Ok(Frame::Simple("OK".to_string()))
     }
 }
 
 impl CommandExecutor for GetCommand {
     async fn execute<'ctx>(
-        self,
+        &self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: CommandContext<'ctx>
+        ctx: CommandContext<'ctx>,
     ) -> Result<Frame, KvError> {
-        let db_lock = ctx.db.store.lock_read(&self.key).await;
-        let value = db_lock.get_string(self.key);
+        let value= if let Some(LockedDb::Read(ref map)) = ctx.db_lock {
+            map.select(&self.key.clone())
+        }else {
+            None
+        };
         match value {
             Some(entry) => {
-                let data = entry.data;
+                let data = entry.data.clone();
 
                 //这是处理字符串的方法
                 match data {

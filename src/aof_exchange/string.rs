@@ -1,22 +1,23 @@
 use bytes::Bytes;
+use futures::SinkExt;
 
 use crate::{
-    aof_exchange::{exchange_absolute_time, parse_int_from_bytes, CommandAofExchange}, command_execute::CommandContext, core_time::get_cached_time_ms, error::{Frame, KvError, SetCommand}
+    aof_exchange::{AofContent, CommandAofExchange, exchange_absolute_time, parse_int_from_bytes},
+    command_execute::CommandContext,
+    core_time::get_cached_time_ms,
+    error::{Frame, KvError, SetCommand},
 };
 
 impl CommandAofExchange for SetCommand {
-    async fn execute_aof<'ctx>(
-        self,
+    async fn execute_aof<'a>(
+        &self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx:  CommandContext<'ctx>
-    ) -> Result<Frame, KvError> {
-        if ctx.command_context.is_none(){
-            return Ok(Frame::Simple("OK".to_string()));
-        }
+        ctx: AofContent<'a>,
+    ) {
         let mut frame_vec = vec![crate::error::Frame::Bulk(Bytes::from("SET".to_string()))];
         frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.key.to_string())));
-        frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.value)));
-        if let Some(expire) = self.expiration {
+        frame_vec.push(crate::error::Frame::Bulk(Bytes::from(self.value.clone())));
+        if let Some(expire) = &self.expiration {
             match expire {
                 crate::error::Expiration::EX(s) => {
                     frame_vec.push(crate::error::Frame::Bulk(Bytes::from("EXAT".to_string())));
@@ -25,28 +26,24 @@ impl CommandAofExchange for SetCommand {
                 }
                 crate::error::Expiration::PX(ms) => {
                     frame_vec.push(crate::error::Frame::Bulk(Bytes::from("PXAT".to_string())));
-                    let expire_bytes = exchange_absolute_time(ms);
+                    let expire_bytes = exchange_absolute_time(ms.clone());
                     frame_vec.push(crate::error::Frame::Bulk(expire_bytes));
                 }
                 crate::error::Expiration::EXAT(s) => {
                     frame_vec.push(crate::error::Frame::Bulk(Bytes::from("EXAT".to_string())));
-                    let expire_bytes = parse_int_from_bytes(s);
+                    let expire_bytes = parse_int_from_bytes(s.clone());
                     frame_vec.push(crate::error::Frame::Bulk(expire_bytes));
-                },
+                }
                 crate::error::Expiration::PXAT(ms) => {
                     frame_vec.push(crate::error::Frame::Bulk(Bytes::from("PXAT".to_string())));
-                    let expire_bytes = parse_int_from_bytes(ms);
+                    let expire_bytes = parse_int_from_bytes(ms.clone());
                     frame_vec.push(crate::error::Frame::Bulk(expire_bytes));
-                },
+                }
             }
         }
-        if let Some(sender) = ctx.command_context {
-            if let Err(e) = sender.aof_tx.send(Frame::Array(frame_vec).serialize()).await {
-                eprintln!("发送AOF消息失败: {}", e);
-            }
-            Ok(Frame::Simple("OK".to_string()))
-        } else {
-            Ok(Frame::Simple("OK".to_string()))
-        }
+        if let Err(e) = ctx.aof_tx.send(Frame::Array(frame_vec).serialize()).await {
+            eprintln!("发送AOF消息失败: {}", e);
+        };
+        ()
     }
 }

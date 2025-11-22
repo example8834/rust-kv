@@ -1,7 +1,10 @@
 use std::{
     clone,
     collections::{BinaryHeap, HashMap, binary_heap},
-    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use crate::{
@@ -11,8 +14,8 @@ use crate::{
 };
 use fxhash::FxHasher;
 use std::hash::{Hash, Hasher};
-use tokio::sync::{RwLock, RwLockWriteGuard};
-
+use tokio::sync::{RwLock, RwLockMappedWriteGuard, RwLockReadGuard, RwLockWriteGuard};
+use crate::core_time::get_cached_time_ms;
 pub mod eviction_alo;
 pub mod lfu;
 pub mod lru;
@@ -34,35 +37,59 @@ pub struct MemoryCacheNode {
 //lua 变更级数据源模拟
 // 定义一个包装类型
 pub enum ChangeOp {
-    Update(ValueEntry), 
-    Delete,             
+    Update(ValueEntry),
+    Delete,
 }
 
-pub struct LuaCacheNode {
-    // 读源
-    pub db_store: HashMap<Arc<String>, ValueEntry>,
-    // 写缓冲：Value 变成 ChangeOp
-    pub differ_map: HashMap<Arc<String>, ChangeOp>, 
+// 包装器代理
+pub struct LuaCacheNode<'a> {
+    pub db_store: DirectCacheNode<'a>,
+    pub differ_map: &'a mut HashMap<Arc<String>, ChangeOp>,
+    // 【新增】内存账本：记录这次 Lua 脚本会导致总内存变化多少
+    // 正数表示增加，负数表示减少
+    pub local_memory_diff: isize,
 }
 
-impl KvOperator for LuaCacheNode {
-    fn insert(&mut self, key: Arc<String>, value: ValueEntry, memory_differ: usize) {
+impl<'a> KvOperator<'a> for LuaCacheNode<'a> {
+    fn insert(&mut self, key: Arc<String>, value: ValueEntry) {
+        let size_before= match self.db_store.select(&key){
+                Some(entry) => entry.data_size,
+                None => 0,
+        };
+        let memory_differ = value.data_size as isize  - size_before as isize;
         self.differ_map.insert(key, ChangeOp::Update(value));
+        self.local_memory_diff += memory_differ;
     }
 
     fn select(&self, key: &Arc<String>) -> Option<&ValueEntry> {
-        self.db_store.get(key)
+        self.db_store.select(key)
     }
 
-    fn delete(&mut self, key: &Arc<String>, memory_differ: usize) {
+    //说明一下 这个usize 转 isize 就是在小于800万TB都是没问题  位数足够大 一般不会超过这个的感觉
+    fn delete(&mut self, key: &Arc<String>) {
+        let size_before= match self.db_store.select(&key){
+                Some(entry) => entry.data_size,
+                None => 0,
+        };
         self.differ_map.insert(key.clone(), ChangeOp::Delete);
+        self.local_memory_diff -= size_before as isize;
     }
-    
+
+    fn get_direct_node(&mut self) -> &mut DirectCacheNode<'a> {
+        &mut self.db_store
+    }
 }
 
-impl LuaCacheNode {
-    fn new(db_store:HashMap<Arc<String>, ValueEntry>,differ_map:HashMap<Arc<String>, ChangeOp>) ->Self{
-        LuaCacheNode { db_store , differ_map }
+impl<'a> LuaCacheNode<'a> {
+    fn new(
+        db_store: DirectCacheNode<'a>,
+        differ_map: &'a mut HashMap<Arc<String>, ChangeOp>,
+    ) -> Self {
+        LuaCacheNode {
+            db_store,
+            differ_map,
+            local_memory_diff: 0,
+        }
     }
 }
 
@@ -88,87 +115,202 @@ impl MemoryCacheNode {
     }
 }
 
-impl KvOperator for MemoryCacheNode {
-    fn insert(&mut self, key: Arc<String>, value: ValueEntry,memory_differ:usize) {
-        self.db_store.insert(key, value);
-        self.approx_memory.fetch_add(memory_differ, Ordering::Relaxed);
+// 场景 A: 普通模式的包装器
+// 它只负责持有锁，操作直接透传给底层
+pub enum DirectCacheNode<'a> {
+    // 这里持有 map 过的锁
+    Writeguard(RwLockWriteGuard<'a, MemoryCacheNode>),
+    Readguard(RwLockReadGuard<'a, MemoryCacheNode>),
+}
+
+impl<'a> KvOperator<'a> for DirectCacheNode<'a> {
+    fn insert(&mut self, key: Arc<String>, value: ValueEntry) {
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => {
+
+            let size_before= match rw_lock_write_guard.db_store.get(&key){
+                Some(entry) => entry.data_size,
+                None => 0,
+            };
+            //值差异
+            let memory_differ = value.data_size as isize  - size_before as isize;
+
+            //插入数值的时候 消耗掉这个
+                rw_lock_write_guard.db_store.insert(key, value);
+
+                // 2. 根据差值的正负，决定是加还是减
+                if memory_differ > 0 {
+                    // 内存增加了：转成 usize 加进去
+                    rw_lock_write_guard
+                        .approx_memory
+                        .fetch_add(memory_differ as usize, Ordering::Relaxed);
+                } else if memory_differ < 0 {
+                    // 内存减少了：取绝对值（变成正数），然后减出去
+                    // (-memory_differ) 就变成了正数，比如 -50 变成 50
+                    rw_lock_write_guard
+                        .approx_memory
+                        .fetch_sub((-memory_differ) as usize, Ordering::Relaxed);
+                }
+            }
+            DirectCacheNode::Readguard(rw_lock_read_guard) => {}
+        }
     }
 
-    fn delete(&mut self, key: &Arc<String>,memory_differ:usize) {
-        self.db_store.remove(key);
-        self.approx_memory.fetch_sub(memory_differ, Ordering::Relaxed);
+    fn delete(&mut self, key: &Arc<String>) {
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => {
+                if let Some(value) = rw_lock_write_guard.db_store.remove(key){
+                    rw_lock_write_guard
+                    .approx_memory
+                    .fetch_sub(value.data_size, Ordering::Relaxed);
+                }
+            }
+            DirectCacheNode::Readguard(rw_lock_read_guard) => {}
+        }
     }
 
-    fn select(&self, key: &Arc<String>) -> Option<&ValueEntry>{
-    self.db_store.get(key)
+    /*
+    读写在内核代理层就完成
+     */
+    fn select(&self, key: &Arc<String>) -> Option<&ValueEntry> {
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => {
+                if let Some(value) = rw_lock_write_guard.db_store.get(key) {
+                    let time_expires = value.expires_at;
+                    if let Some(expire_time) = time_expires {
+                        if get_cached_time_ms() > expire_time {
+                            return None;
+                        }
+                    }
+                    return Some(value);
+                }
+                return None;
+            }
+            DirectCacheNode::Readguard(rw_lock_read_guard) => {
+                if let Some(value) = rw_lock_read_guard.db_store.get(key) {
+                    let time_expires = value.expires_at;
+                    if let Some(expire_time) = time_expires {
+                        if get_cached_time_ms() > expire_time {
+                            return None;
+                        }
+                    }
+                    return Some(value);
+                }
+                return None;
+            },
+        }
     }
 
-    fn as_lock_owner(&self) -> Option<&dyn LockOwner> {
+    fn as_lock_owner(&self) -> Option<&dyn LockOwner<'a>> {
         // 因为我自己实现了 LockOwner，所以我可以把自己转成 Trait Object 返回
         Some(self)
     }
 
     // 如果你需要修改大接口状态，也可以加这个
-    fn as_lock_owner_mut(&mut self) -> Option<&mut dyn LockOwner> {
+    fn as_lock_owner_mut(&mut self) -> Option<&mut dyn LockOwner<'a>> {
         Some(self)
     }
 
+    fn get_direct_node(&mut self) -> &mut DirectCacheNode<'a> {
+        self
+    }
 }
 
-// 这是一个纯净的接口，只管数据读写
-impl LockOwner for MemoryCacheNode {
-    
-    
+impl<'a> LockOwner<'a> for DirectCacheNode<'a> {
     fn get_memory_usage(&self) -> usize {
-        // AtomicUsize 读取需要指定 Ordering
-        // Relaxed 性能最高，通常用于统计足够了
-        self.approx_memory.load(Ordering::Relaxed)
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => {
+                rw_lock_write_guard.approx_memory.load(Ordering::Relaxed)
+            }
+            DirectCacheNode::Readguard(rw_lock_read_guard) => {
+                rw_lock_read_guard.approx_memory.load(Ordering::Relaxed)
+            }
+        }
     }
 
-    fn get_eviction_policy(&mut self) -> &mut dyn EvictionPolicy {
-        // self.evicition 是 Box<dyn EvictionPolicy>
-        // 我们用 as_ref() 或者直接解引用，返回里面的 &dyn 对象
-        self.evicition.as_mut()
+    fn get_mut_eviction_policy(&mut self) -> Option<&mut dyn EvictionPolicy> {
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => {
+                Some(rw_lock_write_guard.evicition.as_mut())
+            }
+            DirectCacheNode::Readguard(rw_lock_read_guard) => None,
+        }
     }
+    fn get_ref_eviction_policy(&mut self) -> Option<&dyn EvictionPolicy> {
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => None,
+            DirectCacheNode::Readguard(rw_lock_read_guard) => {
+                Some(rw_lock_read_guard.evicition.as_ref())
+            }
+        }
+    }
+
     fn add_memory(&self, size: usize) {
-        self.approx_memory.fetch_add(size, Ordering::Relaxed);
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => {
+                rw_lock_write_guard
+                    .approx_memory
+                    .fetch_add(size, Ordering::Relaxed);
+            }
+            DirectCacheNode::Readguard(rw_lock_read_guard) => {
+                rw_lock_read_guard
+                    .approx_memory
+                    .fetch_add(size, Ordering::Relaxed);
+            }
+        }
     }
 
     fn sub_memory(&self, size: usize) {
-        self.approx_memory.fetch_sub(size, Ordering::Relaxed);
+        match self {
+            DirectCacheNode::Writeguard(rw_lock_write_guard) => {
+                rw_lock_write_guard
+                    .approx_memory
+                    .fetch_sub(size, Ordering::Relaxed);
+            }
+            DirectCacheNode::Readguard(rw_lock_read_guard) => {
+                rw_lock_read_guard
+                    .approx_memory
+                    .fetch_sub(size, Ordering::Relaxed);
+            }
+        }
     }
 }
 
 #[derive(Default, Clone)]
 pub struct MemoryCache {
-    pub message: Vec<Arc<RwLock<dyn KvOperator>>>,
+    pub message: Vec<Arc<RwLock<MemoryCacheNode>>>,
 }
 
-
-
 // 这是一个纯净的接口，只管数据读写
-pub trait KvOperator : Send + Sync{
-    fn insert(&mut self, key: Arc<String>, value: ValueEntry, memory_differ: usize);
+pub trait KvOperator<'a>: Send + Sync {
+    fn insert(&mut self, key: Arc<String>, value: ValueEntry);
     fn select(&self, key: &Arc<String>) -> Option<&ValueEntry>;
-    fn delete(&mut self, key: &Arc<String>, memory_differ: usize);
+    fn delete(&mut self, key: &Arc<String>);
 
-    fn as_lock_owner(&self) -> Option<&dyn LockOwner> {
+    // 【核心修改】
+    // 不要用 into_inner(self)，要用引用！
+    // 意思是：给我看看你肚子里的真锁
+    fn get_direct_node(&mut self) -> &mut DirectCacheNode<'a>;
+
+    fn as_lock_owner(&self) -> Option<&dyn LockOwner<'a>> {
         None // 默认情况下，我不是
     }
-    
+
     // 如果你需要修改大接口状态，也可以加这个
-    fn as_lock_owner_mut(&mut self) -> Option<&mut dyn LockOwner> {
+    fn as_lock_owner_mut(&mut self) -> Option<&mut dyn LockOwner<'a>> {
         None
     }
 }
 
 //数据库最基本的三个操作
-pub trait LockOwner : KvOperator {
+pub trait LockOwner<'a>: KvOperator<'a> {
     // 1. 暴露内存大小 (AtomicUsize 通常只返回数值 usize)
     fn get_memory_usage(&self) -> usize;
 
     // 2. 暴露驱逐策略 (返回引用 &dyn，而不是 Box)
-    fn get_eviction_policy(&mut self) -> &mut dyn EvictionPolicy;
+    fn get_mut_eviction_policy(&mut self) -> Option<&mut dyn EvictionPolicy>;
+
+    fn get_ref_eviction_policy(&mut self) -> Option<&dyn EvictionPolicy>;
 
     // 修改内存记账 (封装成行为更好，不要直接暴露 Atomic)
     fn add_memory(&self, size: usize);
@@ -178,7 +320,7 @@ pub trait LockOwner : KvOperator {
 impl MemoryCache {
     pub fn new(config_type: &EvictionType) -> Self {
         // 1. 先拿到一个“空”的 self (store 是个空 Vec)
-        let mut local_vec: Vec<Arc<RwLock<dyn KvOperator>>> = Vec::with_capacity(NUM_SHARDS);
+        let mut local_vec: Vec<Arc<RwLock<MemoryCacheNode>>> = Vec::with_capacity(NUM_SHARDS);
 
         //默认创建 16 个数据库
         for _ in 0..16 {
@@ -203,34 +345,50 @@ impl MemoryCache {
         (hash_value as usize) % NUM_SHARDS
     }
 
-    pub async fn get_lock_write(
-        &self,
-        key: &Arc<String>,
-    ) -> tokio::sync::RwLockWriteGuard<'_, dyn KvOperator> {
+    pub async fn get_lock_write<'a>(&'a self, key: &Arc<String>) -> Box<dyn KvOperator + 'a> {
         let shard_index = MemoryCache::get_shard_index(&key);
-        let shard: tokio::sync::RwLockWriteGuard<'_, dyn KvOperator> =
+        let shard: tokio::sync::RwLockWriteGuard<'_, MemoryCacheNode> =
             self.message[shard_index].write().await;
-        shard
+        Box::new(DirectCacheNode::Writeguard(shard))
     }
 
-    pub async fn get_lock_read(
-        &self,
+    // Lua 调度层调用这个
+    // 注意：这里传入了 differ_map
+    pub async fn lock_write_lua<'a>(
+        &'a self,
         key: &Arc<String>,
-    ) -> tokio::sync::RwLockReadGuard<'_, dyn KvOperator> {
+        differ_map: &'a mut HashMap<Arc<String>, ChangeOp>,
+    ) -> Box<dyn KvOperator + 'a> {
         let shard_index = MemoryCache::get_shard_index(&key);
-        let shard: tokio::sync::RwLockReadGuard<'_, dyn KvOperator> =
+        let shard: tokio::sync::RwLockWriteGuard<'_, MemoryCacheNode> =
+            self.message[shard_index].write().await;
+        Box::new(LuaCacheNode::new(
+            DirectCacheNode::Writeguard(shard),
+            differ_map,
+        ))
+    }
+
+    pub async fn get_lock_read<'a>(&'a self, key: &Arc<String>) -> Box<dyn KvOperator + 'a> {
+        let shard_index = MemoryCache::get_shard_index(&key);
+        let shard: tokio::sync::RwLockReadGuard<'_, MemoryCacheNode> =
             self.message[shard_index].read().await;
-        shard
+        Box::new(DirectCacheNode::Readguard(shard))
     }
 
-    pub async fn get_lock_delete(
-        &self,
+    // Lua 调度层调用这个
+    // 注意：这里传入了 differ_map
+    pub async fn lock_read_lua<'a>(
+        &'a self,
         key: &Arc<String>,
-    ) -> tokio::sync::RwLockWriteGuard<'_, dyn KvOperator> {
+        differ_map: &'a mut HashMap<Arc<String>, ChangeOp>,
+    ) -> Box<dyn KvOperator + 'a> {
         let shard_index = MemoryCache::get_shard_index(&key);
-        let shard: tokio::sync::RwLockWriteGuard<'_, dyn KvOperator> =
-            self.message[shard_index].write().await;
-        shard
+        let shard: tokio::sync::RwLockReadGuard<'_, MemoryCacheNode> =
+            self.message[shard_index].read().await;
+        Box::new(LuaCacheNode::new(
+            DirectCacheNode::Readguard(shard),
+            differ_map,
+        ))
     }
 }
 

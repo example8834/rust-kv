@@ -115,7 +115,7 @@ pub async fn run() {
         // 2. 接受连接循环
         loop {
             let connect_content = ConnectionContent {
-                aof_tx: aof_tx.clone(),
+                aof_tx:aof_tx.clone(),
                 shutdown_tx: connect_shutdown.clone(),
                 receivce_lua:lua_vm_receiver.clone(),
                 lua_handle:lua_handle.clone()

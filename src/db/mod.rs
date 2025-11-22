@@ -38,8 +38,8 @@ impl Db {
 
 //这个的粒度就是基本的粒度
 pub enum LockedDb<'a> {
-    Write(tokio::sync::RwLockWriteGuard<'a, dyn KvOperator>),
-    Read(tokio::sync::RwLockReadGuard<'a, dyn KvOperator>),
+    Write(Box<dyn KvOperator<'a>+ 'a>),
+    Read(Box<dyn KvOperator<'a>+ 'a>),
 }
 
 
@@ -75,7 +75,7 @@ impl Storage {
     }
 
     // lock() 方法现在返回这个新的 LockedDb 守卫，而不是原始的 MutexGuard
-    pub async fn lock_write(&self, key: &Arc<String>) -> LockedDb<'_> {
+    pub async fn lock_write<'a>(&'a self, key: &Arc<String>) -> LockedDb<'a> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
         LockedDb::Write(self.store.get(select_db).unwrap().get_lock_write(key).await)
     }
@@ -84,13 +84,18 @@ impl Storage {
     pub async fn lock_read(&self, key: &Arc<String>) -> LockedDb<'_> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
         LockedDb::Read(self.store.get(select_db).unwrap().get_lock_read(key).await)
-        
     }
 
-    pub async fn lock_delete(&self, key: &Arc<String>) -> LockedDb<'_> {
+    pub async fn lock_write_lua<'a>(&'a self, key: &Arc<String>) -> LockedDb<'a> {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_delete(key).await)
+        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_write(key).await)
     }
+
+    pub async fn lock_read_lua<'a>(&'a self, key: &Arc<String>) -> LockedDb<'a> {
+        let select_db = CONN_STATE.with(|state| state.selected_db);
+        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_write(key).await)
+    }
+
 }
 
 // 一个直接从 Bytes 高效解析 i64 的函数

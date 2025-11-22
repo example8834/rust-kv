@@ -1,28 +1,56 @@
 use std::f32::consts::E;
 
 use bytes::Bytes;
+
 use itoa::Buffer;
+use tokio::sync::mpsc::Sender;
 
 use crate::{
     command_execute::CommandContext,
     core_time::get_cached_time_ms,
-    error::{Frame, KvError},
+    error::{Command, Frame, KvError},
 };
 
 mod string;
 
 pub trait CommandAofExchange {
     // execute 方法現在接收 CommandContext 作為參數！
-     fn execute_aof<'ctx>(
-        self,
+    async fn execute_aof<'a>(
+        &self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: CommandContext<'ctx>,
-    ) -> impl std::future::Future<Output = Result<Frame, KvError>> + Send;
+        ctx: AofContent<'a>,
+    );
 }
+
+/*
+ 基于这个command 指令 实现对应方法 
+ 模块是分开的 并不一定就是代表数据结构是分开的 都是针对command 这个命令的
+ 所以一个模块是功能性划分 结构是实体划分 承载结构
+ */
+impl Command {
+    pub async fn exe_aof_command<'a>(&self,ctx: AofContent<'a>){
+        match self {
+            Command::Set(set_command) => set_command.execute_aof(ctx).await,
+            Command::Get(get_command) => todo!(),
+            Command::Ping(ping_command) => todo!(),
+            Command::Unimplement(unimplement_command) => todo!(),
+            Command::EvalCommand(eval_command) => todo!(),
+        }
+    }
+}
+
+
+#[derive(Clone, Debug)]
+pub struct AofContent<'a> {
+    pub aof_tx: &'a Sender<Vec<u8>>,
+    pub shutdown_tx: &'a tokio::sync::broadcast::Sender<()>
+}
+
 
 pub fn exchange_absolute_time(expire_time: u64) -> Bytes {
     parse_int_from_bytes(get_cached_time_ms() + expire_time)
 }
+
 //高效的int 转byte 方法
 pub fn parse_int_from_bytes(i: u64) -> Bytes {
     let mut buffer = Buffer::new();

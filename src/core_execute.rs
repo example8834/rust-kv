@@ -1,8 +1,10 @@
-use crate::Db;
+use crate::aof_exchange::AofContent;
 use crate::command_execute::{CommandContext, CommandExecutor};
 use crate::context::{ConnectionContent, ConnectionState};
 use crate::core_aof::AofMessage;
+use crate::db::LockedDb;
 use crate::error::{Command, Expiration, Frame, IsAof, KvError, ToBulk};
+use crate::{Db, db};
 use bytes::Bytes;
 use itoa::Buffer;
 use std::f32::consts::E;
@@ -14,39 +16,86 @@ use tokio::sync::mpsc::Sender;
 use tracing_subscriber::registry::Data;
 
 // 假定：Command: Clone
-pub async fn execute_command(command: Command, db: &mut Db) -> Result<Frame, KvError> {
+pub async fn execute_command(command: Command, db: &Db) -> Result<Frame, KvError> {
     // 在调用时直接转换 None 的类型
     // 这个调用现在是完全正确的，因为 `HookFn` 的定义和 `execute_command_hook` 的要求完美匹配
-    let result = execute_command_hook(command, db, None).await;
+    let result = execute_command_hook(&command, Some(db), None, None).await;
     result
 }
 
-pub async fn execute_command_hook(
-    command: Command,
-    db: &mut Db, // post_write_hook 是一个可选的闭包
+pub async fn execute_command_hook<'a>(
+    command: &Command,
+    db: Option<&Db>, // post_write_hook 是一个可选的闭包
     command_context: Option<&mut ConnectionContent>,
+    db_lock: Option<LockedDb<'a>>,
 ) -> Result<Frame, KvError> {
-    let command_context = CommandContext {
-        db,
-        command_context,
-    };
     match command {
-        Command::Get(get) => get.execute(command_context).await,
-        Command::Set(set) => set.execute(command_context).await,
-        Command::Ping(ping) => ping.execute(command_context).await,
-        Command::Unimplement(unimplement) => unimplement.execute(command_context).await,
-        Command::EvalCommand(eval_command) => eval_command.execute(command_context).await,
+        Command::Get(get) => {
+            get.execute(CommandContext {
+                db: None,
+                command_context,
+                db_lock,
+            })
+            .await
+        }
+        Command::Set(set) => {
+            set.execute(CommandContext {
+                db: None,
+                command_context,
+                db_lock,
+            })
+            .await
+        }
+        Command::Ping(ping) => {
+            ping.execute(CommandContext {
+                db: None,
+                command_context,
+                db_lock: None,
+            })
+            .await
+        }
+        Command::Unimplement(unimplement) => {
+            unimplement
+                .execute(CommandContext {
+                    db: None,
+                    command_context,
+                    db_lock: None,
+                })
+                .await
+        }
+        Command::EvalCommand(eval_command) => {
+            eval_command
+                .execute(CommandContext {
+                    db: db,
+                    command_context,
+                    db_lock: None,
+                })
+                .await
+        }
     }
 }
 
 // AI 提供的正确代码，我帮你整理并解释
 pub async fn execute_command_normal(
     command: Command,
-    db: &mut Db,
+    db: &Db,
     command_context: &mut ConnectionContent,
 ) -> Result<Frame, KvError> {
-    let frame: Frame = execute_command_hook(command, db, Some(command_context)).await?;
+    let lock = get_command_lock(&command, db).await;
+    let frame: Frame = execute_command_hook(&command, Some(db), Some(command_context), lock).await?;
+    //在这里同意执行aof 正常情况下的限定执行
+    command.exe_aof_command(AofContent{aof_tx:&command_context.aof_tx,shutdown_tx:&command_context.shutdown_tx});
     Ok(frame)
+}
+
+pub async fn get_command_lock<'a>(command: &Command, db: &'a Db) -> Option<LockedDb<'a>> {
+    match command {
+        Command::Set(set_command) => db.store.lock_write(&set_command.key).await.into(),
+        Command::Get(get_command) => db.store.lock_read(&get_command.key).await.into(),
+        Command::Ping(_) => None,
+        Command::Unimplement(_) => None,
+        Command::EvalCommand(_) => None,
+    }
 }
 
 impl Frame {

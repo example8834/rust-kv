@@ -3,9 +3,7 @@ use futures::SinkExt;
 
 use crate::{
     aof_exchange::{AofContent, CommandAofExchange, exchange_absolute_time, parse_int_from_bytes},
-    command_execute::CommandContext,
-    core_time::get_cached_time_ms,
-    error::{Frame, KvError, SetCommand},
+    error::{Frame, SetCommand},
 };
 
 impl CommandAofExchange for SetCommand {

@@ -1,11 +1,6 @@
 use bytes::Bytes;
 use itoa::Buffer;
-use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    pin::Pin,
-    sync::{Arc, OnceLock, atomic::AtomicUsize},
-    time::Instant,
-};
+use std::sync::Arc;
 pub mod eviction;
 mod generic;
 mod hash;
@@ -13,17 +8,13 @@ mod list;
 mod string;
 
 // 确保有这行
-use tokio::sync::RwLock;
 
 use crate::{
     config::EvictionType,
-    context::{CONN_STATE, ConnectionState},
+    context::CONN_STATE,
     db::eviction::{
-        DirectCacheNode, KvOperator, LockOwner, MemoryCache, MemoryCacheNode,
-        lru::lru_struct::LruNode,
+        KvOperator, LockOwner, MemoryCache,
     },
-    error::KvError,
-    types::ValueEntry,
 };
 
 // 3. 定义并公开那个唯一的、组合好的顶层结构

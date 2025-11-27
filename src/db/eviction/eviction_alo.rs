@@ -1,9 +1,8 @@
 use std::{
-    cmp::Reverse, collections::BinaryHeap, f32::consts::E, sync::{Arc, atomic::Ordering}, thread::JoinHandle, time::Duration, u32, usize
+    cmp::Reverse, collections::BinaryHeap, sync::Arc, time::Duration, u32, usize
 };
 
 use rand::Rng;
-use serde::de::value;
 use tokio::{sync::Mutex, time::Instant};
 
 const EVICTION_MAX_NUMBER: usize = 5;
@@ -11,7 +10,6 @@ const EVICTION_MAX_NUMBER: usize = 5;
 use crate::{
     core_time::get_cached_time_ms,
     db::{Storage, eviction::{LockOwner, MemoryCache}},
-    shutdown,
 };
 
 impl Storage {

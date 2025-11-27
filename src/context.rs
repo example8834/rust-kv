@@ -1,7 +1,6 @@
 use flume::Receiver;
 use mlua::Lua;
 use tokio::{
-    runtime::{Handle, Runtime},
     sync::mpsc::Sender,
     task_local,
 };

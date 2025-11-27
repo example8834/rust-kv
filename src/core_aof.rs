@@ -8,7 +8,6 @@ use tokio::sync::broadcast::Sender;
 use tokio::sync::mpsc::Receiver;
 use tokio::time::{self, Duration};
 
-use crate::context::ConnectionState;
 use crate::core_execute::{ execute_command};
 use crate::core_explain::parse_frame;
 use crate::error::{Command};

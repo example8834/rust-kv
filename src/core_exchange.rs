@@ -1,13 +1,10 @@
-use std::ops::Index;
 
 use crate::command_exchange::CommandExchange;
-use crate::error::Command::{Get, Ping, Set, Unimplement};
 use crate::error::KvError::ProtocolError;
 use crate::error::{
-    Command, Expiration, Frame, GetCommand, KvError, PingCommand, SetCommand, SetCondition,
+    Command, Frame, GetCommand, KvError, PingCommand, SetCommand,
     UnimplementCommand,
 };
-use bytes::Bytes;
 
 impl TryFrom<Frame> for Command {
     type Error = KvError;

@@ -1,4 +1,3 @@
-use std::f32::consts::E;
 
 use bytes::Bytes;
 
@@ -6,9 +5,8 @@ use itoa::Buffer;
 use tokio::sync::mpsc::Sender;
 
 use crate::{
-    command_execute::CommandContext,
     core_time::get_cached_time_ms,
-    error::{Command, Frame, KvError},
+    error::Command,
 };
 
 mod string;

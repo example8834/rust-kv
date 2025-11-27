@@ -1,11 +1,10 @@
 use bytes::Bytes;
-use tracing_subscriber::util;
 
 use crate::{
-    aof_exchange::CommandAofExchange, command_execute::{
+    command_execute::{
         CommandContext, CommandExecutor, bytes_to_i64_fast, calculate_expiration_timestamp_ms,
         parse_int_from_bytes,
-    }, db::LockedDb, error::{Command, Expiration, Frame, GetCommand, KvError, SetCommand, ToBulk}, types::{Element, Value, ValueEntry}
+    }, db::LockedDb, error::{Frame, GetCommand, KvError, SetCommand}, types::{Element, Value, ValueEntry}
 };
 
 impl CommandExecutor for SetCommand {

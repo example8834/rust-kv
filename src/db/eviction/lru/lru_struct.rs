@@ -1,14 +1,10 @@
 use std::{
     collections::HashMap,
     ptr::NonNull,
-    sync::{Arc, atomic::AtomicUsize},
+    sync::Arc,
 };
 
-use fxhash::{FxHasher, hash};
 use rand::Rng;
-use serde_json::map::Keys;
-use std::hash::{Hash, Hasher};
-use tokio::sync::RwLock;
 
 use crate::db::eviction::{
     EvictionPolicy,

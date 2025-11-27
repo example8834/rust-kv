@@ -1,9 +1,9 @@
-use crate::error::Frame::{Array, Bulk};
+use crate::error::Frame::Bulk;
 use crate::error::KvError::ProtocolError;
-use crate::error::{Command, Frame, KvError};
-use bytes::{Buf, Bytes, BytesMut};
+use crate::error::{Frame, KvError};
+use bytes::{Buf, Bytes};
 use memchr::memmem;
-use std::io::{Cursor, stdout};
+use std::io::Cursor;
 /// --- 2. 核心解析逻辑 ---
 
 /// 总调度函数：尝试从可变的 BytesMut 缓冲区解析一个 Frame。

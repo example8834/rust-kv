@@ -1,6 +1,5 @@
 use std::{
-    clone,
-    collections::{BinaryHeap, HashMap, binary_heap},
+    collections::HashMap,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -8,13 +7,13 @@ use std::{
 };
 
 use crate::{
-    config::{CONFIG, EvictionType},
-    db::eviction::lru::{LruCache, lru_struct::LruNode},
+    config::EvictionType,
+    db::eviction::lru::lru_struct::LruNode,
     types::ValueEntry,
 };
 use fxhash::FxHasher;
 use std::hash::{Hash, Hasher};
-use tokio::sync::{Mutex, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock, RwLockMappedWriteGuard, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 use crate::core_time::get_cached_time_ms;
 pub mod eviction_alo;
 pub mod lfu;

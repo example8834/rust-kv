@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use mlua::ffi::lua;
 
 use crate::{
     command_execute::{CommandContext, CommandExecutor},

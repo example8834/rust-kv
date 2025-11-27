@@ -1,20 +1,16 @@
 use std::{collections::HashMap, sync::Arc};
 
-use flume::{Receiver, Sender};
-use mlua::{Error, IntoLua, Lua};
+use flume::Sender;
+use mlua::Lua;
 use tokio::{
     runtime::{Handle, Runtime},
     sync::Mutex,
 };
 
 use crate::{
-    command_exchange::extract_bulk_string,
     command_execute::CommandContext,
     core_execute::execute_command_hook,
-    db::{
-        Db, LockedDb,
-        eviction::{KvOperator, MemoryCache},
-    },
+    db::eviction::{KvOperator, MemoryCache},
     error::{Command, EvalCommand, Frame, KvError},
     lua::lua_exchange::lua_value_to_bulk_frame,
 };

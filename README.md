@@ -1,63 +1,110 @@
-# 高性能异步 Rust KV 数据库 (kv-rs)
+# Rust-KV: 高性能异步 Redis 协议兼容数据库
+[](https://www.rust-lang.org/)
+[](https://www.google.com/search?q=LICENSE)
 
-这是一个使用 Rust 和 [Tokio](https://tokio.rs/) 从零开始构建的高性能、异步、内存键值数据库原型。
+Rust-KV 是一个从零构建的、兼容 RESP 协议的高性能内存键值数据库。
+本项目不仅是一个简单的 KV 存储，更是一个探索 Rust **异步运行时架构**、**Actor 模型**以及**无锁编程**的深度实践项目。
 
-本项目深度集成了现代并发编程模式和系统设计，专注于实现一个高并发、低延迟、高健壮性的内存数据库服务。它不仅是一个功能实现，更是一个对生产级服务器架构的深度实践。
+> **核心特性概览：** 完整的 Lua 脚本支持 (Async VM)、精细化分片锁架构、手写 Unsafe LRU 淘汰、AOF 持久化、优雅停机。
 
-## 核心技术亮点 (Technical Highlights)
+## 🚀 核心技术架构 (Architecture Highlights)
 
-本项目的“技术含金量”体现在对并发、锁、内存管理和系统健壮性的精细化处理上：
+本项目历时 3 个月迭代，重构了核心内核以支持更复杂的业务场景，主要包含以下技术亮点：
 
-### 1\. 生产级服务编排与优雅停机
+### 1\. 异步 Lua 脚本引擎 (Async Lua Architecture)
 
-项目实现了一套完整的、健壮的服务生命周期管理和优雅停机（Graceful Shutdown）机制。
+为了在多线程 Tokio 运行时中高效支持 Lua 脚本（Lua VM 本身是 `!Send` 的），本项目设计了一套基于 **Actor 模型** 的脚本执行引擎：
 
-  * **双通道停机广播:** 使用两个 `tokio::sync::broadcast` 通道（`app_shutdown_tx` 和 `infra_shutdown_tx`）来实现分阶段停机。
-  * **黄金停机顺序:** 严格遵循“先停应用、再停地基”的原则。`Ctrl+C` (`SIGINT`) 或 `SIGTERM` 信号会触发 `app_shutdown_tx`，使服务器立即停止接受新连接 (`listener.accept()`) 和新任务 (`aof_writer_task` 等)。
-  * **JoinHandle 编排:** `main` 函数会 `await` 所有核心任务（如连接管理、内存淘汰、AOF 任务）的 `JoinHandle`，确保它们全部执行完毕。
-  * **最后关闭地基:** 直到所有应用逻辑（包括AOF刷盘）都安全结束后，才会发送 `infra_shutdown_tx` 信号，关闭最底层的服务（如全局时间缓存任务）。
+  * **独立运行时**：启动一个专用的 OS 线程，并在内部运行 `tokio::task::LocalSet`，专门用于承载 Lua 虚拟机。
+  * **Actor 通信**：外部请求通过 `flume` 通道发送 `LuaTask` 消息，包含执行上下文和 `oneshot` 回调通道。
+  * **原生互操作**：实现了 `redis.call` 接口，允许 Lua 脚本异步回调 Rust 原生的 `CommandExecutor`，复用底层的锁逻辑和指令处理逻辑，实现了脚本层与原生层的无缝融合。
 
-### 2\. 精细化分片锁 (Sharded Lock) 架构
+### 2\. 高并发分片存储 (Sharded Storage)
 
-为了实现极高的并发性能，数据库的锁粒度被设计得非常精细，彻底避免了“全局大锁”。
+为了避免全局锁竞争（Global Lock Contention），存储层采用了两级分片架构：
 
-  * **DB 实例分片:** `Storage` 结构持有一个包含16个 `Arc<LruMemoryCache>` 的 `Vec`，模拟16个独立的数据库实例。
-  * **内部哈希分片:** 每个 `LruMemoryCache` 内部**再次**被分为32个分片 (`NUM_SHARDS: usize = 32`)，每个分片拥有一个独立的 `RwLock`。
-  * **高性能哈希:** 使用 `fxhash`（一种非加密的快速哈希算法）来决定 Key 落在哪个内部哈G片上，进一步减少锁竞争。
+  * **物理库分片**：模拟 Redis 的 16 个独立数据库 (`db_index`)。
+  * **内部哈希分片**：每个数据库内部被进一步划分为 **32 个分片 (Shards)**。
+  * **锁粒度控制**：Key 通过 `FxHash` 映射到特定分片，读写操作仅锁定对应的 `RwLock`，极大提升了并发吞吐量。
 
-### 3\. 高级内存淘汰 (Eviction) 策略
+### 3\. 高性能内存管理 (Memory & Eviction)
 
-项目实现了 Redis 同款的、复杂的近似内存淘汰算法，兼顾了性能和效率。
+  * **Unsafe LRU**：为了实现极致的 O(1) 性能，抛弃了标准库容器，使用 `NonNull` 裸指针手写了双向链表来实现 LRU 缓存淘汰策略。
+  * **近似淘汰算法**：实现了类似 Redis 的随机采样淘汰机制 (`eviction_ttl`) 和基于小顶堆 (`BinaryHeap`) 的全局内存监控任务 (`eviction_memory`)。
+  * **原子化记账**：使用 `AtomicUsize` 进行内存使用的实时统计，对性能几乎无损。
 
-  * **近似 TTL 淘汰:** 后台任务 (`eviction_ttl`) 采用**随机采样**策略，而非遍历所有 Key。它随机挑选活跃的分片和 Key，检查其 TTL 是否过期，这是一种高效的近似算法。
-  * **真·LRU 算法:** 为实现高性能 LRU，使用 `unsafe` Rust 手动实现了一个基于裸指针 (`NonNull<Node>`) 的双向链表，用于 `O(1)` 时间复杂度的节点移动。
-  * **并发与时间预算淘汰 (最亮眼的设计):**
-    1.  当全局内存 (`GLOBAL_MEMORY`) 超出限制时。
-    2.  `eviction_memory` 任务使用**小顶堆** (`BinaryHeap`) 快速找出内存占用 **Top N** 的分片。
-    3.  **并发执行:** 为每个 Top N 分片**并发地 `tokio::spawn` 一个专属的清理任务**。
-    4.  **时间预算:** 每个清理任务只持有分片锁 10 毫秒（`time_budget`），清理固定数量的 Key 后就**主动释放锁**并重新 `await`，避免长时间阻塞正常的读写请求。
+### 4\. 健壮的工程实现
 
-### 4\. 健壮的网络层与 AOF 持久化
+  * **RESP 协议解析**：基于 `bytes::BytesMut` 和 `Cursor` 实现了零拷贝（Zero-Copy）的高效 RESP 协议解析器，完美处理 TCP 粘包/半包问题。
+  * **优雅停机 (Graceful Shutdown)**：基于广播通道 (`broadcast::channel`) 编排了复杂的停机顺序（应用层 -\> 任务层 -\> 基础设施层），确保 AOF 刷盘完成且所有连接处理完毕后才关闭服务。
+  * **AOF 持久化**：实现了批量写屏障，利用 Channel 缓冲突发流量，定期批量 `flush` 磁盘。
 
-  * **健壮的 RESP 解析器:** `parse_frame` 函数使用 `Cursor` 在只读的缓冲区切片上进行“预演”解析。只有在“预演”成功（即收到了一个完整的 Frame）后，才会推进 (`advance`) `BytesMut` 缓冲区，完美地处理了 TCP 粘包和半包问题。
-  * **批量 AOF 写入:** AOF 任务 (`aof_writer_task`) 不会每来一条命令就写一次磁盘。它使用 `tokio::select!` 配合 `interval.tick()` 和 `rx.try_recv()`，每秒钟或在收到关闭信号时，从 `mpsc` 通道中**批量拉取**所有待处理的命令，进行一次性的 `write_all` 和 `flush`，大幅提高了I/O效率。
+## 🛠️ 项目结构 (Project Structure)
 
-### 5\. 性能与上下文微优化
+```text
+src/
+├── lua/                # [NEW] Lua 脚本引擎核心
+│   ├── lua_vm.rs       # Lua 虚拟机逻辑 & redis.call 实现
+│   ├── lua_work.rs     # 基于 LocalSet 的 Actor 线程模型
+│   └── lua_exchange.rs # Lua Value <-> Redis Frame 类型转换
+├── db/
+│   ├── mod.rs          # 核心存储结构 Db/Storage
+│   └── eviction/       # 淘汰策略 (包含手写的 Unsafe LRU)
+├── command_execute/    # [Refactor] 指令执行层，支持动态分发
+├── core_exchange.rs    # 协议转换层
+├── server.rs           # Tokio TCP 连接处理循环
+└── main.rs             # 应用程序入口与服务编排
+```
 
-  * **全局原子时间缓存:** 使用 `static CACHED_TIME_MS: AtomicU64`，由一个10ms更新一次的 `infra` 任务（`start_time_caching_task`）维护。所有业务逻辑（如TTL检查、AOF转换）都从这个原子变量中读取时间，避免了频繁的 `SystemTime::now()` 系统调用。
-  * **`task_local!` 上下文管理:** 使用 `tokio::task_local! { pub static CONN_STATE: ... }` 来存储每个连接的上下文（如当前选择的DB）。这使得 `db.lock_write` 等深层函数可以“透明”地获取到当前连接的状态，而不需要在每个函数签名中“钻孔”式地传递 `db_index`。
+## ⚡ 快速开始 (Getting Started)
 
-## 如何运行
+### 环境要求
+
+  * Rust (Latest Stable)
+  * Redis-cli (可选，用于测试)
+
+### 运行服务器
 
 ```bash
 # 克隆项目
-git clone ...
+git clone https://github.com/your-repo/rust-kv.git
 
-# 运行服务器
-cargo run
+# 运行 (Release 模式性能更佳)
+cargo run --release
 ```
+
+服务器默认监听 `127.0.0.1:6379`。
+
+### 测试 Lua 脚本
+
+你可以使用标准的 `redis-cli` 进行交互：
 
 ```bash
-# 在另一个终端使用 redis-cli 连接
-redis-cli
+$ redis-cli
+
+# 设置值
+127.0.0.1:6379> SET mykey "Hello Rust"
+OK
+
+# 执行 Lua 脚本 (在脚本中调用 Rust 原生指令)
+127.0.0.1:6379> EVAL "return redis.call('GET', KEYS[1])" 1 mykey
+"Hello Rust"
+
+# 复杂的原子操作演示
+127.0.0.1:6379> EVAL "local v = redis.call('GET', KEYS[1]); return v .. ' World'" 1 mykey
+"Hello Rust World"
 ```
+
+## 🔮 未来规划 (Roadmap) 目前架构处于搭建状态 之后具体内容都开始填充
+  * [x] 基础 KV 命令 (SET/GET/PING/EXPIRE)
+  * [x] 核心存储架构 (分片锁)
+  * [x] AOF 持久化
+  * [x] **Lua 脚本支持 (EVAL)**
+  * [ ] RDB 快照支持
+  * [ ] Cluster 集群模式
+  * [ ] Stream 数据结构支持
+
+## 📄 License
+
+MIT License
+

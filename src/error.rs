@@ -96,3 +96,15 @@ pub enum IsAof {
     Yes,
     No,
 }
+
+impl Command {
+    pub fn get_key(&self) -> Option<&Arc<String>>{
+        match self {
+            Command::Set(set_command) => Some(&set_command.key),
+            Command::Get(get_command) => Some(&get_command.key),
+            Command::Ping(_ping_command) => None,
+            Command::Unimplement(_unimplement_command) => None,
+            Command::EvalCommand(_eval_command) => None,
+        }
+    }
+}

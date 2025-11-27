@@ -3,7 +3,7 @@ use std::sync::{Arc, atomic::Ordering};
 use crate::{
     core_time::get_cached_time_ms, db::LockedDb, types::ValueEntry
 };
-impl<'a> LockedDb<'a> {
+impl LockedDb {
     // --- 现在你的 set_string 方法变得极其清晰 ---
     pub fn set_string(
         mut self,

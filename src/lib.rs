@@ -25,6 +25,7 @@ use crate::db::Db;
 use crate::error::Command::Unimplement;
 use crate::error::{Command, Frame, KvError};
 use crate::lua::lua_vm::init_lua_vm;
+use crate::lua::lua_work::start_lua_actor;
 use crate::server::handle_connection;
 use crate::shutdown::{ShutDown, shutdown_listener};
 use bytes::{Buf, BytesMut};
@@ -58,8 +59,9 @@ pub async fn run() {
     //初始化lua 环境条件
     let (lua_runtime,lua_handle) = init_lua_vm(lua_vm_sender).await;
 
+    //初始化并且直接获取sender
+    let lua_sender = start_lua_actor();
 
-    
     let aop_file_path = "database.aof";
     // 启动专门的 AOF 写入后台任务
     let aof_task = tokio::spawn(aof_writer_task(rx, aop_file_path, app_shutdown_tx.clone()));
@@ -117,8 +119,8 @@ pub async fn run() {
             let connect_content = ConnectionContent {
                 aof_tx:aof_tx.clone(),
                 shutdown_tx: connect_shutdown.clone(),
-                receivce_lua:lua_vm_receiver.clone(),
-                lua_handle:lua_handle.clone()
+                lua_sender:lua_sender.clone(),
+                receivce_lua:lua_vm_receiver.clone()
             };
             let mut receiver = connect_content.shutdown_tx.subscribe();
             // 等待一个新的客户端连接

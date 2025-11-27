@@ -10,7 +10,7 @@ use crate::{
 
 impl CommandExecutor for SetCommand {
     // 必须在这里也加上 <'ctx> 和对应的生命周期标注
-    async fn execute<'ctx>(&self, ctx: CommandContext<'ctx>) -> Result<Frame, KvError> {
+    async fn execute(&self, ctx: CommandContext,db_lock: Option<& mut LockedDb>) -> Result<Frame, KvError> {
         let time_expire_u64: Option<u64>;
         let time_expire = if let Some(expire) = &self.expiration {
             time_expire_u64 = Some(calculate_expiration_timestamp_ms(expire));
@@ -24,7 +24,7 @@ impl CommandExecutor for SetCommand {
             None => ValueEntry::new(Value::Simple(Element::String(self.value.clone())), time_expire),
         };
         //ctx.db_lock.unwrap().set_string(self.key.clone(), value_obj);
-        if let Some(LockedDb::Write(mut map)) = ctx.db_lock {
+        if let Some(LockedDb::Write(  map)) = db_lock {
             map.insert(self.key.clone(), value_obj);
         }
         Ok(Frame::Simple("OK".to_string()))
@@ -32,12 +32,13 @@ impl CommandExecutor for SetCommand {
 }
 
 impl CommandExecutor for GetCommand {
-    async fn execute<'ctx>(
+    async fn execute(
         &self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: CommandContext<'ctx>,
+        ctx: CommandContext,
+        db_lock: Option<& mut LockedDb>
     ) -> Result<Frame, KvError> {
-        let value= if let Some(LockedDb::Read(ref map)) = ctx.db_lock {
+        let value= if let Some(LockedDb::Read( map)) = db_lock {
             map.select(&self.key.clone())
         }else {
             None

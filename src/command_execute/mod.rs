@@ -12,19 +12,19 @@ use crate::{
 };
  mod common;
  mod string;
-
-pub struct CommandContext<'a> {
-    pub db: Option<&'a Db>,
-    pub command_context: Option<&'a mut ConnectionContent>,
-    pub db_lock: Option<LockedDb<'a>>
+ #[derive(Clone)]
+pub struct CommandContext {
+    pub db: Option<Db>,
+    pub connect_content: Option<ConnectionContent>
 }
 
 pub trait CommandExecutor {
       // 模板方法
-    fn execute<'ctx>(
+    fn execute(
         &self,
         // ✅ 核心改动：从 &mut CommandContext 变成了 &CommandContext
-        ctx:  CommandContext<'ctx>,
+        ctx:  CommandContext,
+        db_lock: Option<& mut LockedDb>
     ) -> impl std::future::Future<Output = Result<Frame, KvError>> + Send ;
 
     // “原语”方法

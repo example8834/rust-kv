@@ -145,7 +145,7 @@ async fn explain_execute_command(
             Ok(command) => match frame {
                 _ => {
                     //这个事指令错误 而不是结构化错误
-                    let result: Frame = execute_command_normal(command, db, command_content).await?;
+                    let result: Frame = execute_command_normal(command, db, command_content.clone()).await?;
                     vec_result.push(result.serialize());
                     vec = &vec[size..];
                     total_size += size;

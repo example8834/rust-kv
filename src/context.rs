@@ -1,6 +1,12 @@
 use flume::Receiver;
 use mlua::Lua;
-use tokio::{runtime::{Handle, Runtime}, sync::mpsc::Sender, task_local};
+use tokio::{
+    runtime::{Handle, Runtime},
+    sync::mpsc::Sender,
+    task_local,
+};
+
+use crate::lua::lua_work::LuaTask;
 
 // 定义我们想为每个任务独立存储的状态
 #[derive(Clone, Debug)]
@@ -13,8 +19,8 @@ pub struct ConnectionState {
 pub struct ConnectionContent {
     pub aof_tx: Sender<Vec<u8>>,
     pub shutdown_tx: tokio::sync::broadcast::Sender<()>,
-    pub receivce_lua : Receiver<Lua>,
-    pub lua_handle:Handle,
+    pub lua_sender: Sender<LuaTask>,
+    pub receivce_lua: Receiver<Lua>,
 }
 
 // 使用 task_local! 宏来声明一个名为 CONN_STATE 的“插槽”

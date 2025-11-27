@@ -1,84 +1,157 @@
+use std::{collections::HashMap, sync::Arc};
+
 use flume::{Receiver, Sender};
-use mlua::{Error, Lua};
-use tokio::runtime::{Handle, Runtime};
+use mlua::{Error, IntoLua, Lua};
+use tokio::{
+    runtime::{Handle, Runtime},
+    sync::Mutex,
+};
 
 use crate::{
     command_exchange::extract_bulk_string,
-    db::Db,
-    error::{Command, Frame, KvError},
+    command_execute::CommandContext,
+    core_execute::execute_command_hook,
+    db::{
+        Db, LockedDb,
+        eviction::{KvOperator, MemoryCache},
+    },
+    error::{Command, EvalCommand, Frame, KvError},
     lua::lua_exchange::lua_value_to_bulk_frame,
 };
 
-/*
-处理lua 的vm 的脚本执行方法
-*/
-pub async fn lua_vm_redis_call(receivce: Receiver<Lua>, db: & mut Db, lua_handle: Handle) {
-    let lua = receivce.recv_async().await.unwrap();
-    // 3.【核心】这就是你说的“回调结构”！
-    //    我们正在创建一个 Lua 能调用的 Rust 异步函数
-    let redis_call: mlua::Function<'_> = lua.create_async_function(
-        // 关键改变在这里！我们只接收一个 `args`，它包含了所有参数！
-        move |lua_ctx, mut args: mlua::MultiValue| async move {
-            // `args` 是一个迭代器，包含了 Lua 传来的所有东西
+impl EvalCommand {
+    /*
+    处理lua 的vm 的脚本执行方法
+    */
+    pub async fn lua_vm_redis_call(
+        &self,
+        command_content: CommandContext,
+    ) -> Result<Frame, KvError> {
+        let receiver = command_content
+            .connect_content
+            .clone()
+            .unwrap()
+            .receivce_lua;
+        //获取lua 实体 进行操作
+        let lua = receiver.recv_async().await.unwrap();
 
-            // 1.【解析命令】我们从“数组”里弹出第一个元素，作为命令
-            let cmd: String = args
-                .pop_front() // 弹出第一个
-                .ok_or_else(|| {
-                    mlua::Error::runtime("redis.call requires at least one argument (the command)")
-                })?
-                .to_string()?; // .to_string() 自动把 LuaValue 转成 String
+        //直接转成集合
+        let mut shard_indices: Vec<usize> = self
+            .keys
+            .clone()
+            .into_iter()
+            .map(|k| MemoryCache::get_shard_index(&k))
+            .collect();
+        shard_indices.sort_unstable();
+        shard_indices.dedup();
 
-            // 2.【解析参数】现在 `args` 里剩下的所有东西，都是命令的参数
-            //    (比如 'my_key', 'val1', 'val2', ...)
+        // 准备一个容器存放抢到的锁，这就是 LuaContext 的雏形
+        let sessions = Arc::new(Mutex::new(HashMap::new()));
 
-            let a: Option<&mlua::Value<'_>> = args.iter().next();
-            // 1. “惰性”迭代器 (计划)
-            //    类型是 Iterator<Item = Result<Frame, Error>>
-            let frame_iterator = args.into_iter().map(lua_value_to_bulk_frame);
+        // 3. 按顺序遍历，一个个抢
+        for shard_index in shard_indices {
+            let db = command_content.db.clone().unwrap();
+            // lock_shard_write 是异步的，这里会等待直到拿到锁
+            // 因为是按顺序的，所以绝对不会死锁
+            let guard = db.store.lock_write_lua(shard_index).await;
 
-            // 2. “执行”计划，处理“转换失败”（“不行就中断”）
-            //    .collect() 是“制造” Vec<Frame> 的唯一方法
-            let frames_vec: Result<Vec<Frame>, mlua::Error> = frame_iterator.collect();
+            // 抢到了！包装成 Session 塞进 Map
+            sessions.lock().await.insert(shard_index, guard);
+        }
 
-            // 3. 处理中断（报错）
-            let frames: Vec<Frame> = match frames_vec {
-                Ok(f) => f, // 成功！我们拿到了 Vec<Frame>
-                Err(e) => {
-                    // 失败！我们在这里“直接报错”
-                    return Err(e);
+        let db = command_content.db.clone();
+
+        //    我们正在创建一个 Lua 能调用的 Rust 异步函数
+        let redis_call = lua.create_async_function(
+            // 关键改变在这里！我们只接收一个 `args`，它包含了所有参数！
+            move |lua, mut args: mlua::MultiValue| {
+                let db_clone = db.clone();
+                let sessions = sessions.clone();
+                let content = command_content.connect_content.clone();
+                async move {
+                    // `args` 是一个迭代器，包含了 Lua 传来的所有东西
+                    // 1.【解析命令】我们从“数组”里弹出第一个元素，作为命令
+                    let cmd: String = args
+                        .pop_front() // 弹出第一个
+                        .ok_or_else(|| {
+                            mlua::Error::runtime(
+                                "redis.call requires at least one argument (the command)",
+                            )
+                        })?
+                        .to_string()?; // .to_string() 自动把 LuaValue 转成 String
+                    
+                    // 1. “惰性”迭代器 (计划)
+                    //    类型是 Iterator<Item = Result<Frame, Error>>
+                    let frame_iterator = args.into_iter().map(lua_value_to_bulk_frame);
+
+                    // 2. “执行”计划，处理“转换失败”（“不行就中断”）
+                    //    .collect() 是“制造” Vec<Frame> 的唯一方法
+                    let frames_vec: Result<Vec<Frame>, mlua::Error> = frame_iterator.collect();
+
+                    // 3. 处理中断（报错）
+                    let frames: Vec<Frame> = match frames_vec {
+                        Ok(f) => f, // 成功！我们拿到了 Vec<Frame>
+                        Err(e) => {
+                            // 失败！我们在这里“直接报错”
+                            return Err(e);
+                        }
+                    };
+
+                    let command = Command::try_from(Frame::Array(frames))
+                        .map_err(|e| mlua::Error::runtime("redis.call 之后进行类型转换"))?;
+
+                    if let Some(key) = command.get_key() {
+                        let shard_index = MemoryCache::get_shard_index(key);
+                        let mut lock = sessions.lock().await;
+                        let lock = lock.get_mut(&shard_index);
+
+                        // 执行层代码复用
+                        // 修正点：
+                        // 1. 去掉了闭包里多余的 `->`
+                        // 2. 修正了末尾的括号数量
+                        // 3. 这一行应该是作为返回值，所以去掉了 let frame = (或者是你确实需要赋值，看下文逻辑)
+                        // 这里假设你是想返回 execute_command_hook 的结果：
+                        let frame = execute_command_hook(&command, db_clone, content, lock)
+                            .await
+                            .map_err(|_| mlua::Error::runtime("lua 脚本内部命令执行失败"))
+                            .unwrap();
+                        Ok(frame)
+                    } else {
+                        // 修正点：加上了 missing 的 else
+                        Err(mlua::Error::runtime("lua 脚本内部未知错误"))
+                    }
                 }
-            };
+            },
+        ).map_err(|e| {
+            // 把 mlua 的错误转成你的 KvError
+            // 这样你的系统内部就统一了
+            KvError::ProtocolError(format!("Lua脚本错误: {}", e))
+        })?;
+        let redis_table = lua
+            .create_table()
+            .map_err(|_| mlua::Error::runtime("redis.call 之后进行类型转换"))
+            .unwrap();
 
-            //调整参数传入
-            let command = Command::try_from(Frame::Array(frames))
-                .map_err(|e| mlua::Error::runtime("redis.call 之后进行类型转换"))?;
-            ()
-        },
-    )?; // 'async_function' 是因为我们的 get/set 是 async 的
+        let _ = redis_table.set("call", redis_call);
 
-    
-
-    let redis_table = lua
-        .create_table()
-        .map_err(|e| mlua::Error::runtime("redis.call 之后进行类型转换"))?;
-
-    redis_table.set("call", redis_call);
-
-    lua.globals().set("redis", redis_table);
-
-    lua_handle.spawn(async move {
-        let result = lua.load(script).eval_async().await;
-    });
-
-
+        let _ = lua.globals().set("redis", redis_table);
+        let script = self.script.clone();
+        let result: Result<Frame, mlua::Error> = lua.load(script).eval_async::<Frame>().await;
+        // 【在这里】统一进行错误类型转换
+        let final_result: Result<Frame, KvError> = result.map_err(|e| {
+            // 把 mlua 的错误转成你的 KvError
+            // 这样你的系统内部就统一了
+            KvError::ProtocolError(format!("Lua脚本错误: {}", e))
+        });
+        final_result
+    }
 }
 
 //初始化放入通道
 pub async fn init_lua_vm(sender: Sender<Lua>) -> (Runtime, Handle) {
     // 1. 【【【 你要的“专用池” 】】】
     let lua_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2) // 👈 “制定占用俩核心”
+        .worker_threads(2)
         .enable_all()
         .build()
         .unwrap();

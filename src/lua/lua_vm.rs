@@ -174,10 +174,13 @@ impl EvalCommand {
             KvError::ProtocolError(format!("Lua脚本错误: {}", e))
         });
         let mut entry = sessions.lock().await;
-        //拿出arc 的所有权 并且全部提交
-        for (_size, lock) in entry.drain() {
-            if let LockedDb::Write(lock_mut) = lock {
-                lock_mut.as_transactional().unwrap().commit().await;
+        //如果没有问题就提交
+        if final_result.is_ok() {
+            //拿出arc 的所有权 并且全部提交
+            for (_size, lock) in entry.drain() {
+                if let LockedDb::Write(lock_mut) = lock {
+                    lock_mut.as_transactional().unwrap().commit().await;
+                }
             }
         }
         final_result

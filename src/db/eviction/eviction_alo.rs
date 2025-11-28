@@ -49,22 +49,22 @@ impl Storage {
                 let random_active_index = rand::thread_rng().gen_range(0..active_shards.len());
                 let (db_index, shard_index) = active_shards[random_active_index];
                 //抽取后获取锁
-                let mut shard = self.get_lock_read(db_index, shard_index).await;
+                let mut shard = self.get_lock_write(db_index, shard_index).await;
                 //获取锁后再次判断 如果没有数据就跳过了
                 if shard.get_memory_usage() == 0 {
                     //说明这个分片已经没有数据了
                     active_shards.swap_remove(random_active_index);
                     continue;
                 }
-                let key = shard.get_mut_eviction_policy().unwrap().get_random_sample_key().unwrap();
-                if let Some(value) = shard.select(&key) {
+                let key = shard.get_eviction_policy().await.unwrap().get_random_sample_key().unwrap();
+                if let Some(value) = shard.select(&key).await {
                     if let Some(expire_time) = value.expires_at {
                         if get_cached_time_ms() > expire_time {
                             //更新分片和整体内存数据
                             let data_size = value.data_size;
                             shard.add_memory(data_size);
                             //调用方法删除
-                            let _ = shard.get_mut_eviction_policy().unwrap().on_delete(key);
+                            let _ = shard.get_eviction_policy().await.unwrap().on_delete(key);
                         }
                     }
                 }
@@ -141,11 +141,11 @@ impl Storage {
                             }
                             //再次精确判断 锁内部判断就完全没有问题了
                             if Storage::get_global_memory_not_move(store.clone(),target_memory).await {
-                                let key = shard_lock.get_mut_eviction_policy().unwrap().pop_victim();
+                                let key = shard_lock.get_eviction_policy().await.unwrap().pop_victim();
                                 if let Some(key) = key {
                                     let data_size =
-                                        shard_lock.select(&key).unwrap().data_size;
-                                    shard_lock.get_mut_eviction_policy().unwrap().on_delete(key);
+                                        shard_lock.select(&key).await.unwrap().data_size;
+                                    shard_lock.get_eviction_policy().await.unwrap().on_delete(key);
                                     //现在删除内存更新分片和全局内存数据
                                     shard_lock.sub_memory(data_size);
                                     processed_count += 1;

@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    ptr::NonNull,
-    sync::Arc,
-};
+use std::{collections::HashMap, ptr::NonNull, sync::Arc};
 
 use rand::Rng;
 
@@ -100,9 +96,8 @@ impl EvictionPolicy for LruNode {
         let random_active_index = rand::thread_rng().gen_range(0..self.sample_keys.len());
         Some(self.sample_keys.get(random_active_index).cloned().unwrap())
     }
-    
+
     fn pop_victim(&mut self) -> Option<Arc<String>> {
         self.list.pop_front()
     }
-    
 }

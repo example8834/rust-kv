@@ -11,6 +11,7 @@ use crate::{
 pub struct CommandContext {
     pub db: Option<Db>,
     pub connect_content: Option<ConnectionContent>
+    
 }
 
 pub trait CommandExecutor {

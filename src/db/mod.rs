@@ -82,7 +82,7 @@ impl Storage {
      */
     pub async fn lock_write_lua<'a>(&'a self, shard_index: usize) -> LockedDb {
         let select_db = CONN_STATE.with(|state| state.selected_db);
-        LockedDb::Write(self.store.get(select_db).unwrap().get_lock_write_shard_index(shard_index).await)
+        LockedDb::Write(self.store.get(select_db).unwrap().get_lua_lock_write_shard_index(shard_index).await)
     }
 
     pub async fn lock_read_lua<'a>(&'a self, shard_index: usize) -> LockedDb  {
@@ -92,7 +92,7 @@ impl Storage {
 
     // 修改后（正确）：
     pub async fn get_lock_write(
-        self,
+        &self,
         db_index: usize,
         shard_index: usize,
     ) -> Box<dyn LockOwner> {

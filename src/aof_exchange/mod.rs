@@ -1,13 +1,9 @@
-
 use bytes::Bytes;
 
 use itoa::Buffer;
 use tokio::sync::mpsc::Sender;
 
-use crate::{
-    core_time::get_cached_time_ms,
-    error::Command,
-};
+use crate::{core_time::get_cached_time_ms, error::Command};
 
 mod string;
 
@@ -21,29 +17,29 @@ pub trait CommandAofExchange {
 }
 
 /*
- 基于这个command 指令 实现对应方法 
- 模块是分开的 并不一定就是代表数据结构是分开的 都是针对command 这个命令的
- 所以一个模块是功能性划分 结构是实体划分 承载结构
- */
+基于这个command 指令 实现对应方法
+模块是分开的 并不一定就是代表数据结构是分开的 都是针对command 这个命令的
+所以一个模块是功能性划分 结构是实体划分 承载结构
+*/
 impl Command {
-    pub async fn exe_aof_command<'a>(&self,ctx: AofContent<'a>){
+    pub async fn exe_aof_command<'a>(&self, ctx: AofContent<'a>) {
         match self {
             Command::Set(set_command) => set_command.execute_aof(ctx).await,
-            Command::Get(get_command) => todo!(),
-            Command::Ping(ping_command) => todo!(),
-            Command::Unimplement(unimplement_command) => todo!(),
-            Command::EvalCommand(eval_command) => todo!(),
+            // 把里面的变量都换成 _，表示“我不关心里面是啥”
+            Command::Get(_)
+            | Command::Ping(_)
+            | Command::Unimplement(_)
+            | Command::EvalCommand(_) => {
+            }
         }
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub struct AofContent<'a> {
     pub aof_tx: &'a Sender<Vec<u8>>,
-    pub shutdown_tx: &'a tokio::sync::broadcast::Sender<()>
+    pub shutdown_tx: &'a tokio::sync::broadcast::Sender<()>,
 }
-
 
 pub fn exchange_absolute_time(expire_time: u64) -> Bytes {
     parse_int_from_bytes(get_cached_time_ms() + expire_time)

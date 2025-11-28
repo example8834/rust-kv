@@ -2,8 +2,7 @@
 use crate::command_exchange::CommandExchange;
 use crate::error::KvError::ProtocolError;
 use crate::error::{
-    Command, Frame, GetCommand, KvError, PingCommand, SetCommand,
-    UnimplementCommand,
+    Command, EvalCommand, Frame, GetCommand, KvError, PingCommand, SetCommand, UnimplementCommand
 };
 
 impl TryFrom<Frame> for Command {
@@ -40,7 +39,7 @@ impl TryFrom<Frame> for Command {
                     }
                     "PING" => PingCommand::exchange(iter, command_name),
                     //lua 脚本
-                    "EVAL" => PingCommand::exchange(iter, command_name),
+                    "EVAL" => EvalCommand::exchange(iter, command_name),
 
                     // 4. 所有其他不认识的命令，都匹配到这里
                     _ => UnimplementCommand::exchange(iter, command_name),

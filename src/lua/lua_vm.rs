@@ -10,7 +10,10 @@ use tokio::{
 use crate::{
     command_execute::CommandContext,
     core_execute::execute_command_hook,
-    db::eviction::{KvOperator, MemoryCache},
+    db::{
+        LockedDb,
+        eviction::{KvOperator, MemoryCache},
+    },
     error::{Command, EvalCommand, Frame, KvError},
     lua::lua_exchange::lua_value_to_bulk_frame,
 };
@@ -44,6 +47,33 @@ impl EvalCommand {
         // 准备一个容器存放抢到的锁，这就是 LuaContext 的雏形
         let sessions = Arc::new(Mutex::new(HashMap::new()));
 
+        // 1. 定义一个临时闭包，专门负责设置环境
+        let setup_env = |lua: &Lua| -> mlua::Result<()> {
+            // --- 设置 KEYS ---
+            let keys_table = lua.create_table()?;
+            for (i, key) in self.keys.iter().enumerate() {
+                // 【绝杀点】显式调用 create_string
+                // 不管 key 是什么，强制变成 Lua 的 String 类型，绝无可能变成 Table
+                let lua_str = lua.create_string(key.as_bytes())?;
+                keys_table.set(i + 1, lua_str)?;
+            }
+            lua.globals().set("KEYS", keys_table)?;
+
+            // --- 设置 ARGV ---
+            let argv_table = lua.create_table()?;
+            for (i, arg) in self.args.iter().enumerate() {
+                // 【绝杀点】同理，强制转 String
+                let lua_str = lua.create_string(arg.as_bytes())?;
+                argv_table.set(i + 1, lua_str)?;
+            }
+            lua.globals().set("ARGV", argv_table)?;
+
+            Ok(())
+        };
+        // 2. 调用闭包，并统一处理错误 (转成 KvError)
+        setup_env(&lua).map_err(|e| {
+            KvError::ProtocolError(format!("Lua全局变量(KEYS/ARGV)注入失败: {}", e))
+        })?;
         // 3. 按顺序遍历，一个个抢
         for shard_index in shard_indices {
             let db = command_content.db.clone().unwrap();
@@ -56,73 +86,75 @@ impl EvalCommand {
         }
 
         let db = command_content.db.clone();
-
+        let sessions_clone = sessions.clone();
         //    我们正在创建一个 Lua 能调用的 Rust 异步函数
-        let redis_call = lua.create_async_function(
-            // 关键改变在这里！我们只接收一个 `args`，它包含了所有参数！
-            move |lua, mut args: mlua::MultiValue| {
-                let db_clone = db.clone();
-                let sessions = sessions.clone();
-                let content = command_content.connect_content.clone();
-                async move {
-                    // `args` 是一个迭代器，包含了 Lua 传来的所有东西
-                    // 1.【解析命令】我们从“数组”里弹出第一个元素，作为命令
-                    let cmd: String = args
-                        .pop_front() // 弹出第一个
-                        .ok_or_else(|| {
-                            mlua::Error::runtime(
-                                "redis.call requires at least one argument (the command)",
-                            )
-                        })?
-                        .to_string()?; // .to_string() 自动把 LuaValue 转成 String
-                    
-                    // 1. “惰性”迭代器 (计划)
-                    //    类型是 Iterator<Item = Result<Frame, Error>>
-                    let frame_iterator = args.into_iter().map(lua_value_to_bulk_frame);
+        let redis_call = lua
+            .create_async_function(
+                // 关键改变在这里！我们只接收一个 `args`，它包含了所有参数！
+                move |_lua, args: mlua::MultiValue| {
+                    let db_clone = db.clone();
+                    let sessions = sessions_clone.clone();
+                    let content = command_content.connect_content.clone();
+                    async move {
+                        // `args` 是一个迭代器，包含了 Lua 传来的所有东西
+                        // 1.【解析命令】我们从“数组”里弹出第一个元素，作为命令
+                        // let cmd: String = args
+                        //     .pop_front() // 弹出第一个
+                        //     .ok_or_else(|| {
+                        //         mlua::Error::runtime(
+                        //             "redis.call requires at least one argument (the command)",
+                        //         )
+                        //     })?
+                        //     .to_string()?; // .to_string() 自动把 LuaValue 转成 String
 
-                    // 2. “执行”计划，处理“转换失败”（“不行就中断”）
-                    //    .collect() 是“制造” Vec<Frame> 的唯一方法
-                    let frames_vec: Result<Vec<Frame>, mlua::Error> = frame_iterator.collect();
+                        // 1. “惰性”迭代器 (计划)
+                        //    类型是 Iterator<Item = Result<Frame, Error>>
+                        let frame_iterator = args.into_iter().map(lua_value_to_bulk_frame);
 
-                    // 3. 处理中断（报错）
-                    let frames: Vec<Frame> = match frames_vec {
-                        Ok(f) => f, // 成功！我们拿到了 Vec<Frame>
-                        Err(e) => {
-                            // 失败！我们在这里“直接报错”
-                            return Err(e);
+                        // 2. “执行”计划，处理“转换失败”（“不行就中断”）
+                        //    .collect() 是“制造” Vec<Frame> 的唯一方法
+                        let frames_vec: Result<Vec<Frame>, mlua::Error> = frame_iterator.collect();
+
+                        // 3. 处理中断（报错）
+                        let frames: Vec<Frame> = match frames_vec {
+                            Ok(f) => f, // 成功！我们拿到了 Vec<Frame>
+                            Err(e) => {
+                                // 失败！我们在这里“直接报错”
+                                return Err(e);
+                            }
+                        };
+
+                        let command = Command::try_from(Frame::Array(frames))
+                            .map_err(|e| mlua::Error::runtime("redis.call 之后进行类型转换"))?;
+
+                        if let Some(key) = command.get_key() {
+                            let shard_index = MemoryCache::get_shard_index(key);
+                            let mut lock = sessions.lock().await;
+                            let lock = lock.get_mut(&shard_index);
+
+                            // 执行层代码复用
+                            // 修正点：
+                            // 1. 去掉了闭包里多余的 `->`
+                            // 2. 修正了末尾的括号数量
+                            // 3. 这一行应该是作为返回值，所以去掉了 let frame = (或者是你确实需要赋值，看下文逻辑)
+                            // 这里假设你是想返回 execute_command_hook 的结果：
+                            let frame = execute_command_hook(&command, db_clone, content, lock)
+                                .await
+                                .map_err(|_| mlua::Error::runtime("lua 脚本内部命令执行失败"))
+                                .unwrap();
+                            Ok(frame)
+                        } else {
+                            // 修正点：加上了 missing 的 else
+                            Err(mlua::Error::runtime("lua 脚本内部未知错误"))
                         }
-                    };
-
-                    let command = Command::try_from(Frame::Array(frames))
-                        .map_err(|e| mlua::Error::runtime("redis.call 之后进行类型转换"))?;
-
-                    if let Some(key) = command.get_key() {
-                        let shard_index = MemoryCache::get_shard_index(key);
-                        let mut lock = sessions.lock().await;
-                        let lock = lock.get_mut(&shard_index);
-
-                        // 执行层代码复用
-                        // 修正点：
-                        // 1. 去掉了闭包里多余的 `->`
-                        // 2. 修正了末尾的括号数量
-                        // 3. 这一行应该是作为返回值，所以去掉了 let frame = (或者是你确实需要赋值，看下文逻辑)
-                        // 这里假设你是想返回 execute_command_hook 的结果：
-                        let frame = execute_command_hook(&command, db_clone, content, lock)
-                            .await
-                            .map_err(|_| mlua::Error::runtime("lua 脚本内部命令执行失败"))
-                            .unwrap();
-                        Ok(frame)
-                    } else {
-                        // 修正点：加上了 missing 的 else
-                        Err(mlua::Error::runtime("lua 脚本内部未知错误"))
                     }
-                }
-            },
-        ).map_err(|e| {
-            // 把 mlua 的错误转成你的 KvError
-            // 这样你的系统内部就统一了
-            KvError::ProtocolError(format!("Lua脚本错误: {}", e))
-        })?;
+                },
+            )
+            .map_err(|e| {
+                // 把 mlua 的错误转成你的 KvError
+                // 这样你的系统内部就统一了
+                KvError::ProtocolError(format!("Lua脚本错误: {}", e))
+            })?;
         let redis_table = lua
             .create_table()
             .map_err(|_| mlua::Error::runtime("redis.call 之后进行类型转换"))
@@ -132,6 +164,8 @@ impl EvalCommand {
 
         let _ = lua.globals().set("redis", redis_table);
         let script = self.script.clone();
+
+        //预期执行
         let result: Result<Frame, mlua::Error> = lua.load(script).eval_async::<Frame>().await;
         // 【在这里】统一进行错误类型转换
         let final_result: Result<Frame, KvError> = result.map_err(|e| {
@@ -139,6 +173,13 @@ impl EvalCommand {
             // 这样你的系统内部就统一了
             KvError::ProtocolError(format!("Lua脚本错误: {}", e))
         });
+        let mut entry = sessions.lock().await;
+        //拿出arc 的所有权 并且全部提交
+        for (_size, lock) in entry.drain() {
+            if let LockedDb::Write(lock_mut) = lock {
+                lock_mut.as_transactional().unwrap().commit().await;
+            }
+        }
         final_result
     }
 }

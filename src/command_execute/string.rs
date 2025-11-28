@@ -24,7 +24,7 @@ impl CommandExecutor for SetCommand {
         };
         //ctx.db_lock.unwrap().set_string(self.key.clone(), value_obj);
         if let Some(LockedDb::Write(  map)) = db_lock {
-            map.insert(self.key.clone(), value_obj);
+            map.insert(self.key.clone(), value_obj).await;
         }
         Ok(Frame::Simple("OK".to_string()))
     }
@@ -34,11 +34,11 @@ impl CommandExecutor for GetCommand {
     async fn execute(
         &self,
         // 2. 将这个生命周期 'ctx 应用到 CommandContext 的引用上
-        ctx: CommandContext,
+        _ctx: CommandContext,
         db_lock: Option<& mut LockedDb>
     ) -> Result<Frame, KvError> {
         let value= if let Some(LockedDb::Read( map)) = db_lock {
-            map.select(&self.key.clone())
+            map.select(&self.key.clone()).await
         }else {
             None
         };

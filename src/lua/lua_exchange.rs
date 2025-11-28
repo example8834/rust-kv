@@ -29,6 +29,8 @@ pub fn lua_value_to_bulk_frame(value: Value<'_>) -> Result<Frame,mlua::Error> {
         | Value::UserData(_)
         | Value::LightUserData(_)
         | Value::Error(_) => {
+            // 打印具体的类型信息
+            eprintln!("CRITICAL DEBUG: Lua 传给 redis.call 的参数类型不对！接收到的参数是: {:?}", value);
             return Err(mlua::Error::runtime("invalid argument type for redis.call"));
         }
     };

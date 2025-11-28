@@ -27,7 +27,6 @@ use crate::shutdown::{ShutDown, shutdown_listener};
 use mlua::Lua;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{self};
 use tokio::sync::{Mutex, broadcast};

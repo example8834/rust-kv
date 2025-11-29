@@ -9,7 +9,7 @@ const EVICTION_MAX_NUMBER: usize = 5;
 
 use crate::{
     core_time::get_cached_time_ms,
-    db::{Storage, eviction::{LockOwner, MemoryCache}},
+    db::{Storage, eviction::{LockOwner, MemoryCache, NUM_SHARDS}},
 };
 
 impl Storage {
@@ -31,7 +31,7 @@ impl Storage {
             //先创建一个数组存储
             let mut active_shards: Vec<(usize, usize)> = Vec::new();
             for db_index in 0..16 {
-                for shard_index in 0..32 {
+                for shard_index in 0..NUM_SHARDS {
                     let shard = self.get_lock_read(db_index, shard_index).await;
                     if shard.get_memory_usage() > 0 {
                         active_shards.push((db_index, shard_index));
@@ -99,7 +99,7 @@ impl Storage {
                 let mut shard_indices: BinaryHeap<Reverse<(usize, usize, usize)>> =
                     BinaryHeap::with_capacity(EVICTION_MAX_NUMBER);
                 for db_index in 0..16 {
-                    for shard_index in 0..32 {
+                    for shard_index in 0..NUM_SHARDS {
                         let shard =  self.get_lock_read(db_index, shard_index).await;
                         let memory = shard.get_memory_usage();
                         //跳过为空的
@@ -176,7 +176,7 @@ impl Storage {
         let mut global_memory = 0;
         //这个是通过计算每个分片获取数据
         for db_index in 0..16 {
-            for shard_index in 0..32 {
+            for shard_index in 0..NUM_SHARDS {
                 let shard_lock = self.get_lock_read(db_index, shard_index).await;
                 global_memory += shard_lock.as_lock_owner().unwrap().get_memory_usage();
                 if global_memory > max_size {
@@ -192,7 +192,7 @@ impl Storage {
         let mut global_memory = 0;
         //这个是通过计算每个分片获取数据
         for db_index in 0..16 {
-            for shard_index in 0..32 {
+            for shard_index in 0..NUM_SHARDS {
                 let shard_lock = store[db_index].message[shard_index].clone().read_owned().await;
                 global_memory += shard_lock.get_memory_usage();
                 if global_memory > max_size {

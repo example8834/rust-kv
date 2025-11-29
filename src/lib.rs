@@ -35,8 +35,8 @@ use tokio::sync::{Mutex, broadcast};
    各种服务的编排和关联
  */
 pub async fn run() {
-    // 创建一个容量为 1024 的管道
-    let (aof_tx, rx) = mpsc::channel::<AofMessage>(1024);
+    // 这个通道必须要大 这个事最基本的事情
+    let (aof_tx, rx) = mpsc::channel::<AofMessage>(1000000);
     //获取类型 这个广播
     let (app_shutdown_tx, _) = broadcast::channel::<()>(1);
 
@@ -132,7 +132,7 @@ pub async fn run() {
                 }
             };
             // let (socket, _) = listener.accept().await;
-            tracing::info!("接收到新连接");
+            //tracing::info!("接收到新连接");
             let db = db.clone();
 
             let initial_state = ConnectionState {

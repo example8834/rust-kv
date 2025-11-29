@@ -60,7 +60,7 @@ pub async fn handle_connection(
                         buf.advance(index + 2);
                     }
                 } else {
-                    println!("{:?}", std::str::from_utf8(&buf));
+                    //println!("{:?}", std::str::from_utf8(&buf));
                     match explain_execute_command(
                         &mut buf,
                         &mut db,
@@ -69,7 +69,7 @@ pub async fn handle_connection(
                     .await
                     {
                         Ok(result) => {
-                            print!("{}", result.len());
+                            //print!("{}", result.len());
                             for item in result {
                                 socket.write_all(&item).await?;
                             }
@@ -93,7 +93,7 @@ pub async fn handle_connection(
                     };
                 }
 
-                println!("已回送数据");
+                //println!("已回送数据");
             }
             ConnectionEvent::Shutdown => {
                 println!("客户端主动关闭，退出循环。");

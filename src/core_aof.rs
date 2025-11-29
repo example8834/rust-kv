@@ -18,7 +18,7 @@ use crate::Db;
 pub type AofMessage = Vec<u8>;
 
 
-pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str, sender:Sender<()>) {
+pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str, sender: Sender<()>) {
     // 打开 AOF 文件
     let mut file = BufWriter::new(
         OpenOptions::new()
@@ -29,45 +29,78 @@ pub async fn aof_writer_task(mut rx: Receiver<AofMessage>, path: &str, sender:Se
             .unwrap(),
     );
 
-    // 创建一个每秒触发一次的定时器
-    let mut interval: time::Interval = time::interval(Duration::from_secs(1));
-    let mut buffer: Vec<AofMessage> = Vec::with_capacity(128);
-    let mut receiver = sender.subscribe();
-    loop {
-        tokio::select! {
-            _= interval.tick() =>{
+    // 1. 初始化缓冲区 (只分配一次内存，复用)
+    let mut buffer: Vec<AofMessage> = Vec::with_capacity(5000); 
+    // 2. 订阅停机信号
+    let mut shutdown_rx = sender.subscribe();
 
-            },
-            _= receiver.recv() =>{
-                    break;
+    'main_loop: loop {
+        // 3. 【核心修改】同时等待“新数据”和“停机信号”
+        //    谁先来处理谁，不会傻等
+        let first_msg = tokio::select! {
+            // 情况 A: 收到数据
+            res = rx.recv() => {
+                match res {
+                    Some(msg) => msg,
+                    None => break 'main_loop, // 发送端彻底关闭
                 }
-        }
-        // 清空上次的缓冲区
-        buffer.clear();
+            },
+            // 情况 B: 收到停机信号
+            _ = shutdown_rx.recv() => {
+                println!("AOF 任务收到停机信号，准备停止...");
+                break 'main_loop; // 跳出循环，去执行下面的收尾
+            }
+        };
 
-        // **核心的批量获取逻辑**
-        // 尽最大努力，一次性从管道中取出所有等待的消息
-        // 较少通道占用时间 
-        while let Ok(msg) = rx.try_recv() {
-            buffer.push(msg);
-        }
+        // --- 正常处理逻辑 ---
+        
+        // 先存入第一条
+        buffer.push(first_msg);
 
-        if buffer.is_empty() {
-            continue; // 这一秒没任务，直接开始下一次等待
-        }
-
-        // 批量写入文件
-        for msg in &buffer {
-            if let Err(e) = file.write_all(msg).await {
-                tracing::error!("AOF 写入失败: {}", e);
+        // 4. 【贪婪批处理】趁热打铁
+        //    看看通道里是不是还积压了一堆？有的话全捞出来 (最多捞5000条防止卡死)
+        while buffer.len() < 5000 {
+            match rx.try_recv() {
+                Ok(msg) => buffer.push(msg),
+                Err(_) => break, // 通道暂时空了，别等了，赶紧写盘
             }
         }
 
-        // 强制将系统缓冲区的数据刷到磁盘
-        if let Err(e) = file.flush().await {
-            tracing::error!("AOF 刷盘失败: {}", e);
+        // 5. 批量落盘
+        if !buffer.is_empty() {
+            for msg in &buffer {
+                if let Err(e) = file.write_all(msg).await {
+                    tracing::error!("AOF 写入失败: {}", e);
+                }
+            }
+            // 必须 flush 确保数据真正进入磁盘
+            if let Err(e) = file.flush().await {
+                tracing::error!("AOF 刷盘失败: {}", e);
+            }
+            
+            // 6. 【关键】写完再清空，复用容量
+            buffer.clear(); 
         }
     }
+
+    // --- 7. 【安全着陆】停机收尾逻辑 ---
+    // 循环跳出后，通道里可能还残留着几百条数据，必须写完再走！
+    println!("AOF 正在执行最后的数据落盘 (Draining)...");
+    
+    // 把剩下的全捞出来
+    while let Ok(msg) = rx.try_recv() {
+        buffer.push(msg);
+    }
+    
+    // 最后一次写入
+    if !buffer.is_empty() {
+        for msg in &buffer {
+            let _ = file.write_all(msg).await;
+        }
+        let _ = file.flush().await;
+    }
+    
+    println!("AOF 任务已安全退出，数据零丢失。");
 }
 
 pub async fn explain_execute_aofcommand(

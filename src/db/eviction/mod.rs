@@ -16,8 +16,7 @@ pub mod eviction_alo;
 pub mod lfu;
 pub mod lru;
 
-pub const NUM_SHARDS: usize = 32; // 32 个分片
-pub const NUM_DBS: usize = 32; // 32 个分片
+pub const NUM_SHARDS: usize = 64; // 64 个分片
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct TtlEntry {
     expires_at: u64,

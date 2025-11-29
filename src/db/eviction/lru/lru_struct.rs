@@ -7,7 +7,6 @@ use crate::db::eviction::{
     lru::lru_linklist::{LruList, Node},
 };
 
-pub const NUM_SHARDS: usize = 32; // 32 个分片
 
 pub struct LruNode {
     pub list: LruList,

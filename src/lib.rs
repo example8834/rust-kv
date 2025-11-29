@@ -21,7 +21,7 @@ use crate::core_aof::{AofMessage, aof_writer_task, explain_execute_aofcommand};
 use crate::core_time::start_time_caching_task;
 use crate::db::Db;
 use crate::lua::lua_vm::init_lua_vm;
-use crate::lua::lua_work::start_lua_actor;
+use crate::lua::lua_work::start_multi_lua_actor;
 use crate::server::handle_connection;
 use crate::shutdown::{ShutDown, shutdown_listener};
 use mlua::Lua;
@@ -50,7 +50,7 @@ pub async fn run() {
     let (lua_runtime,lua_handle) = init_lua_vm(lua_vm_sender).await;
 
     //初始化并且直接获取sender
-    let lua_sender = start_lua_actor();
+    let lua_sender = start_multi_lua_actor(8,100000);
 
     let aop_file_path = "database.aof";
     // 启动专门的 AOF 写入后台任务

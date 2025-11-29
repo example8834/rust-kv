@@ -5,7 +5,7 @@ use tokio::{
     task_local,
 };
 
-use crate::lua::lua_work::LuaTask;
+use crate::lua::lua_work::{LuaRouter, LuaTask};
 
 // 定义我们想为每个任务独立存储的状态
 #[derive(Clone, Debug)]
@@ -14,11 +14,11 @@ pub struct ConnectionState {
     pub client_address: Option<String>,
 }
 // 定义我们想为每个任务独立存储的状态
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ConnectionContent {
     pub aof_tx: Sender<Vec<u8>>,
     pub shutdown_tx: tokio::sync::broadcast::Sender<()>,
-    pub lua_sender: Sender<LuaTask>,
+    pub lua_sender: LuaRouter,
     pub receivce_lua: Receiver<Lua>,
 }
 

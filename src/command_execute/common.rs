@@ -59,7 +59,7 @@ impl CommandExecutor for EvalCommand {
         //这一步记得传递上下文
         content
             .lua_sender
-            .send(LuaTask {
+            .dispatch(LuaTask {
                 ctx: ctx.clone(),
                 resp: tx,
                 command: self.clone(),
@@ -78,7 +78,7 @@ impl CommandExecutor for EvalCommand {
         let result = match channel_result {
             Ok(inner_result) => {
                 // 通道正常，拿到里面的 Result<Frame, KvError>
-                println!("通道接收成功，Lua 执行结果: {:?}", inner_result);
+                //println!("通道接收成功，Lua 执行结果: {:?}", inner_result);
                 inner_result
                 // 如果你需要把 inner_result 赋值给 result 变量
                 // let result = inner_result;

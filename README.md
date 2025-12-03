@@ -57,15 +57,3 @@
 * **优雅停机 (Graceful Shutdown):** 基于 `broadcast` 通道实现的双层停机（应用层 -> 基础设施层），确保在服务关闭前，所有挂起的 AOF 数据都被刷入磁盘，数据零丢失。
 * **Unsafe 手写 LRU:** 为了追求极致的 `O(1)` 淘汰性能，使用 `NonNull` 裸指针手写双向链表，结合 `HashMap` 索引，实现了生产级的 LRU 淘汰算法。
 * **零拷贝协议解析:** 基于 `bytes::BytesMut` 和 `Cursor` 实现的 RESP 解析器，在解析过程中零内存分配。
-
-## 快速开始 (Getting Started)
-
-### 环境要求
-* Rust (Latest Stable)
-* Redis-cli (用于测试交互)
-
-### 运行服务器
-
-1. **克隆项目**
-   ```bash
-   git clone [https://github.com/your-repo/kv-rs.git](https://github.com/your-repo/kv-rs.git)

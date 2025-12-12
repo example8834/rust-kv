@@ -6,17 +6,18 @@
 
 ## 🚀 极致性能 (Performance Benchmark)
 
-基于 MacBook Pro (M-Series) 本地回环测试，在开启 **AOF 持久化 (fsync enabled)** 的真实场景下测得：
+基于 Mac本地回环测试，使用工业级压测工具 `memtier_benchmark` (开启多线程 + Pipeline) 测得：
 
-| 测试场景 (Benchmark Scenario) | QPS (Requests/sec) | 瓶颈分析 |
+| 测试场景 (Benchmark Scenario) | QPS (Requests/sec) | 核心优势与瓶颈分析 |
 | :--- | :--- | :--- |
-| **基础 KV 写入 (SET)** | **130,000+** | 内核纯内存操作极限，瓶颈主要在系统调用与网络 I/O |
-| **简单 Lua 脚本 (return 'hello')** | **110,000+** | **ThreadLocal 上下文注入** 消除所有 FFI 开销，接近原生 Rust 速度 |
-| **复杂事务 Lua (GET + Calc + SET)** | **31,000+** | 涉及多次数据库读写锁竞争与 AOF 刷盘，表现极其稳定 |
+| **混合读写 (Mixed SET/GET)** | **1,000,000+** | **百万级吞吐！** 4线程并发彻底释放多核性能，Actor 模型无锁调度成为关键 |
+| **纯内存读取 (GET)** | **630,000+** | **Sharded SwissTable** 结合零拷贝解析 (Zero-Copy)，极致利用 CPU L1/L2 缓存 |
+| **纯内存写入 (SET)** | **450,000+** | **多队列分片** 配合 Group Commit 策略，在高并发写入下完美消除锁竞争 |
 
-> **测试指令参考:**
+> **复现指令参考:**
+>
 > ```bash
-> redis-benchmark -p 6379 -c 100 -n 100000 -q -r 100000 EVAL "..."
+> memtier_benchmark -s 127.0.0.1 -p 6379 -t 4 -c 50 --pipeline=32 --ratio=1:1
 > ```
 
 ## 🛠️ 核心架构与技术亮点 (Core Architecture)
